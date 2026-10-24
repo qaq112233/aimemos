@@ -14,6 +14,12 @@ import (
 // ALLOWED_USERNAMES for both messages and button presses.
 func (s *Service) authorize(next bot.HandlerFunc) bot.HandlerFunc {
 	return func(ctx context.Context, b *bot.Bot, update *models.Update) {
+		if s.notebook != nil {
+			if s.notebookAccess(update) {
+				next(ctx, b, update)
+			}
+			return
+		}
 		switch {
 		case update.Message != nil:
 			msg := update.Message

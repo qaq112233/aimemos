@@ -15,9 +15,11 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
+	"github.com/usememos/memogram/internal/config"
 	"github.com/usememos/memogram/internal/memos"
 	"github.com/usememos/memogram/internal/memosapi"
 	"github.com/usememos/memogram/internal/store"
+	"github.com/usememos/memogram/internal/workflow"
 )
 
 // UserStore persists each Telegram user's Memos access token and settings.
@@ -31,6 +33,10 @@ type UserStore interface {
 
 // Options configures a Service.
 type Options struct {
+	// Notebook enables the single-user, explicit-save workflow instead of
+	// upstream's immediate capture. NewGenerator receives token-safe file bytes.
+	Notebook     *config.Notebook
+	NewGenerator func(workflow.Fetch) workflow.Generator
 	// Token is the Telegram bot token.
 	Token string
 	// ServerURL optionally replaces the Telegram Bot API server.
@@ -51,12 +57,15 @@ type Options struct {
 }
 
 type Service struct {
-	bot       *bot.Bot
-	memos     *memos.Client
-	store     UserStore
-	downloads *http.Client
-	allowed   map[string]struct{}
-	albums    *mediaGroups
+	notebook    *workflow.Service
+	notebookCfg *config.Notebook
+	statusAt    time.Time
+	bot         *bot.Bot
+	memos       *memos.Client
+	store       UserStore
+	downloads   *http.Client
+	allowed     map[string]struct{}
+	albums      *mediaGroups
 
 	// spaces reports whether the Memos server supports spaces. It is set from
 	// the instance version at startup and cleared if the server reports
@@ -104,6 +113,11 @@ func New(opts Options) (*Service, error) {
 			slog.Error("Telegram client error", slog.Any("err", redactTelegramError(err)))
 		}),
 	}
+	if opts.Notebook != nil {
+		// One worker admits updates in Telegram order. Slow AI/save jobs leave
+		// this worker immediately, after taking a workflow snapshot.
+		botOptions = append(botOptions, bot.WithWorkers(1), bot.WithNotAsyncHandlers())
+	}
 	if opts.ServerURL != "" {
 		botOptions = append(botOptions, bot.WithServerURL(opts.ServerURL))
 	}
@@ -112,6 +126,16 @@ func New(opts Options) (*Service, error) {
 		return nil, fmt.Errorf("create Telegram bot: %w", redactTelegramError(err))
 	}
 	s.bot = b
+	if opts.Notebook != nil {
+		s.notebookCfg = opts.Notebook
+		var generator workflow.Generator
+		if opts.NewGenerator != nil {
+			generator = opts.NewGenerator(s.fetchNotebookFile)
+		}
+		s.notebook = workflow.New(opts.Notebook, generator, notebookDestination{s})
+		b.RegisterHandler(bot.HandlerTypeCallbackQueryData, "", bot.MatchTypePrefix, s.handleNotebookCallback)
+		return s, nil
+	}
 	b.RegisterHandlerMatchFunc(isCommand(commandStart), s.handleStart)
 	b.RegisterHandlerMatchFunc(isCommand(commandSearch), s.handleSearch)
 	b.RegisterHandlerMatchFunc(isCommand(commandSpace), s.handleSpace)
@@ -145,6 +169,9 @@ func (s *Service) Start(ctx context.Context) {
 	}
 	if s.spaces.Load() {
 		commands = append(commands, models.BotCommand{Command: commandSpace, Description: "Choose the default space for new memos"})
+	}
+	if s.notebook != nil {
+		commands = []models.BotCommand{{Command: "start", Description: "查看笔记机器人用法"}, {Command: "status", Description: "查看当前素材和草稿"}, {Command: "model", Description: "查看或切换模型"}, {Command: "retry", Description: "重试上次整理"}}
 	}
 	if _, err := s.bot.SetMyCommands(ctx, &bot.SetMyCommandsParams{Commands: commands}); err != nil {
 		slog.Error("failed to set bot commands", slog.Any("err", redactTelegramError(err)))

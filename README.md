@@ -1,5 +1,7 @@
 # Memogram
 
+This local fork also includes a single-user AI notebook with explicit save confirmation. See [笔记模式 MVP](README_NOTEBOOK.md) for its configuration, operation and verification limits. The upstream immediate-save mode documented below is retained when `NOTEBOOK_CONFIG` is unset.
+
 **Memogram** is an easy to use integration service for syncing messages and images from a Telegram bot into your Memos.
 
 ## Prerequisites

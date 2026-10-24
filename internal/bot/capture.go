@@ -17,6 +17,10 @@ import (
 // sender's default space if they chose one, uploads its file, and replies
 // with a link and the memo's buttons.
 func (s *Service) handleMessage(ctx context.Context, _ *bot.Bot, update *models.Update) {
+	if s.notebook != nil {
+		s.handleNotebookMessage(ctx, update)
+		return
+	}
 	msg := update.Message
 	if msg == nil || msg.From == nil {
 		return
