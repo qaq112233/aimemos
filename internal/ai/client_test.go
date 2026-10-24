@@ -57,7 +57,7 @@ func TestProtocolsParametersImagesAndUsage(t *testing.T) {
 					"a": {BaseURL: serverA.URL + "/v1", KeyEnv: "TEST_AI_A", Timeout: time.Second, Headers: map[string]string{"X-Provider": "a"}},
 					"b": {BaseURL: serverB.URL + "/v1", KeyEnv: "TEST_AI_B", Timeout: time.Second}}, Models: map[string]config.Model{"chosen": m}, SystemPrompt: "base prompt", TagPrompt: "tag prompt", CommonTags: []string{"Go"}}
 				profile := config.Profile{Prompt: "profile prompt", Images: vision, Tags: true, Parameters: config.Parameters{MaxTokens: ptr(int64(200)), ReasoningEffort: ptr("medium"), ReasoningBudget: ptr(int64(50)), Verbosity: ptr("low"), Extra: map[string]any{"thinking": map[string]any{"enabled": true}}}}
-				params := config.Merge(m.Defaults, profile.Parameters, config.Parameters{MaxTokens: ptr(int64(300)), TopP: ptr(0.9), Extra: map[string]any{"temperature": 0.7}})
+				params := config.Parameters{MaxTokens: ptr(int64(300)), TopP: ptr(0.9), Extra: map[string]any{"temperature": 0.7}}
 				fetches := 0
 				client := New(cfg, func(context.Context, workflow.Attachment) (workflow.File, error) {
 					fetches++
@@ -107,10 +107,30 @@ func TestOptionalFieldsOmittedAndExtensionsWin(t *testing.T) {
 		if body := parameters(m, config.Parameters{}); len(body) != 0 {
 			t.Fatalf("sent unset optional values: %+v", body)
 		}
-		p := config.Merge(config.Parameters{Extra: map[string]any{"reasoning": map[string]any{"summary": "auto", "effort": "low"}}}, config.Parameters{Extra: map[string]any{"reasoning": map[string]any{"effort": "high"}}})
-		body := parameters(m, p)
+		body := parameters(m, config.Parameters{Extra: map[string]any{"reasoning": map[string]any{"summary": "auto", "effort": "low"}}}, config.Parameters{Extra: map[string]any{"reasoning": map[string]any{"effort": "high"}}})
 		if body["reasoning"].(map[string]any)["effort"] != "high" || body["reasoning"].(map[string]any)["summary"] != "auto" {
 			t.Fatal("extension precedence")
+		}
+	}
+}
+
+func TestHigherLayerOrdinaryParametersOverrideLowerExtensions(t *testing.T) {
+	for _, protocol := range []string{"responses", "chat_completions"} {
+		m := config.Model{Protocol: protocol}
+		lower := config.Parameters{Extra: map[string]any{"temperature": 0.8, "reasoning": map[string]any{"effort": "high", "summary": "auto"}, "reasoning_effort": "high"}}
+		profile := config.Parameters{Temperature: ptr(0.3), ReasoningEffort: ptr("low")}
+		temporary := config.Parameters{Temperature: ptr(0.1)}
+		body := parameters(m, lower, profile, temporary)
+		if body["temperature"] != 0.1 {
+			t.Fatalf("lower extra overrode temporary: %+v", body)
+		}
+		if protocol == "responses" {
+			r := body["reasoning"].(map[string]any)
+			if r["effort"] != "low" || r["summary"] != "auto" {
+				t.Fatalf("lower extra overrode profile or lost unrelated leaf: %+v", body)
+			}
+		} else if body["reasoning_effort"] != "low" {
+			t.Fatalf("lower extra overrode chat profile: %+v", body)
 		}
 	}
 }

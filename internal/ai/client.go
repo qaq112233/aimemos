@@ -35,14 +35,20 @@ func (c *Client) Generate(ctx context.Context, req workflow.Request) (workflow.R
 		return workflow.Result{}, errors.New("未知模型")
 	}
 	p := c.cfg.Providers[m.Provider]
-	if req.Parameters.ReasoningBudget != nil && m.ReasoningBudgetField == "" {
+	layers := []config.Parameters{m.Defaults, req.Profile.Parameters, req.Parameters}
+	budget := false
+	for _, layer := range layers {
+		budget = budget || layer.ReasoningBudget != nil
+	}
+	if budget && m.ReasoningBudgetField == "" {
 		return workflow.Result{}, errors.New("本模型未配置 reasoning_budget_field，不能发送思考预算")
 	}
-	if regexp.MustCompile(`\((?:[0-9]+|none|auto|minimal|low|medium|high|xhigh)\)$`).MatchString(m.ID) {
-		_, extraReasoning := req.Parameters.Extra["reasoning"]
-		_, extraThinking := req.Parameters.Extra["thinking"]
-		_, extraEffort := req.Parameters.Extra["reasoning_effort"]
-		if req.Parameters.ReasoningEffort != nil || req.Parameters.ReasoningBudget != nil || extraReasoning || extraThinking || extraEffort {
+	body := parameters(m, layers...)
+	if regexp.MustCompile(`(?i)\((?:[0-9]+|none|auto|minimal|low|medium|high|xhigh)\)$`).MatchString(m.ID) {
+		_, extraReasoning := body["reasoning"]
+		_, extraThinking := body["thinking"]
+		_, extraEffort := body["reasoning_effort"]
+		if budget || extraReasoning || extraThinking || extraEffort {
 			return workflow.Result{}, errors.New("模型名已带思考后缀，请移除后缀或请求体中的重复思考设置")
 		}
 	}
@@ -118,7 +124,6 @@ func (c *Client) Generate(ctx context.Context, req workflow.Request) (workflow.R
 			}
 		}
 	}
-	body := parameters(m, req.Parameters)
 	body["model"], body["store"] = m.ID, false
 	if m.Protocol == "responses" {
 		parts := []map[string]any{{"type": "input_text", "text": string(input)}}
@@ -149,42 +154,46 @@ func (c *Client) Generate(ctx context.Context, req workflow.Request) (workflow.R
 	return workflow.Result{Text: choice.Message.Content, Truncated: choice.FinishReason != "stop", InputTokens: result.Usage.PromptTokens, OutputTokens: result.Usage.CompletionTokens}, nil
 }
 
-func parameters(m config.Model, p config.Parameters) map[string]any {
+func parameters(m config.Model, layers ...config.Parameters) map[string]any {
 	body := map[string]any{}
-	if p.MaxTokens != nil {
-		field := "max_output_tokens"
-		if m.Protocol == "chat_completions" {
-			field = m.TokenField
-			if field == "" {
-				field = "max_completion_tokens"
+	for _, p := range layers {
+		layer := map[string]any{}
+		if p.MaxTokens != nil {
+			field := "max_output_tokens"
+			if m.Protocol == "chat_completions" {
+				field = m.TokenField
+				if field == "" {
+					field = "max_completion_tokens"
+				}
+			}
+			layer[field] = *p.MaxTokens
+		}
+		if p.ReasoningEffort != nil {
+			if m.Protocol == "responses" {
+				layer["reasoning"] = map[string]any{"effort": *p.ReasoningEffort}
+			} else {
+				layer["reasoning_effort"] = *p.ReasoningEffort
 			}
 		}
-		body[field] = *p.MaxTokens
-	}
-	if p.ReasoningEffort != nil {
-		if m.Protocol == "responses" {
-			body["reasoning"] = map[string]any{"effort": *p.ReasoningEffort}
-		} else {
-			body["reasoning_effort"] = *p.ReasoningEffort
+		if p.ReasoningBudget != nil && m.ReasoningBudgetField != "" {
+			setPath(layer, m.ReasoningBudgetField, *p.ReasoningBudget)
 		}
-	}
-	if p.ReasoningBudget != nil && m.ReasoningBudgetField != "" {
-		setPath(body, m.ReasoningBudgetField, *p.ReasoningBudget)
-	}
-	if p.Temperature != nil {
-		body["temperature"] = *p.Temperature
-	}
-	if p.TopP != nil {
-		body["top_p"] = *p.TopP
-	}
-	if p.Verbosity != nil {
-		if m.Protocol == "responses" {
-			body["text"] = map[string]any{"verbosity": *p.Verbosity}
-		} else {
-			body["verbosity"] = *p.Verbosity
+		if p.Temperature != nil {
+			layer["temperature"] = *p.Temperature
 		}
+		if p.TopP != nil {
+			layer["top_p"] = *p.TopP
+		}
+		if p.Verbosity != nil {
+			if m.Protocol == "responses" {
+				layer["text"] = map[string]any{"verbosity": *p.Verbosity}
+			} else {
+				layer["verbosity"] = *p.Verbosity
+			}
+		}
+		config.MergeMap(layer, p.Extra)
+		config.MergeMap(body, layer)
 	}
-	config.MergeMap(body, p.Extra)
 	return body
 }
 

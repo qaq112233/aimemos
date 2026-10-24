@@ -34,7 +34,7 @@ type Request struct {
 	Materials    []Material
 	Draft        string
 	Requirements []string
-	Parameters   config.Parameters
+	Parameters   config.Parameters // Temporary overrides; AI applies model < profile < temporary.
 }
 type Result struct {
 	Text                      string
@@ -257,7 +257,7 @@ func (s *Service) BeginGenerate(key, id, profile, instruction string, temporary 
 		g.requirements = append(g.requirements, instruction)
 	}
 	g.profile, g.generating = profile, true
-	req := Request{Model: model, Profile: p, Materials: slices.Clone(g.materials), Draft: g.draft.Text, Requirements: slices.Clone(g.requirements), Parameters: config.Merge(m.Defaults, p.Parameters, temporary)}
+	req := Request{Model: model, Profile: p, Materials: slices.Clone(g.materials), Draft: g.draft.Text, Requirements: slices.Clone(g.requirements), Parameters: temporary}
 	return s.view("正在生成素材快照；期间仍可发送新素材"), func(ctx context.Context) View {
 		result, err := s.gen.Generate(ctx, req)
 		s.mu.Lock()

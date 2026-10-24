@@ -77,35 +77,7 @@ type Parameters struct {
 	Extra           map[string]any `yaml:"extra"`
 }
 
-// Merge applies model < profile < temporary. Extra maps merge recursively;
-// explicit protocol extension leaves take precedence over ordinary parameters.
-func Merge(layers ...Parameters) Parameters {
-	var out Parameters
-	out.Extra = map[string]any{}
-	for _, p := range layers {
-		if p.MaxTokens != nil {
-			out.MaxTokens = p.MaxTokens
-		}
-		if p.ReasoningEffort != nil {
-			out.ReasoningEffort = p.ReasoningEffort
-		}
-		if p.ReasoningBudget != nil {
-			out.ReasoningBudget = p.ReasoningBudget
-		}
-		if p.Temperature != nil {
-			out.Temperature = p.Temperature
-		}
-		if p.TopP != nil {
-			out.TopP = p.TopP
-		}
-		if p.Verbosity != nil {
-			out.Verbosity = p.Verbosity
-		}
-		MergeMap(out.Extra, p.Extra)
-	}
-	return out
-}
-
+// MergeMap recursively merges structured protocol fields without sharing maps.
 func MergeMap(dst, src map[string]any) {
 	for k, v := range src {
 		if nested, ok := v.(map[string]any); ok {

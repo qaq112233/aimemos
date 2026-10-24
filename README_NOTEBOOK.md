@@ -66,7 +66,7 @@ Compose 只启动 Memogram，连接已经部署的 Memos。`localhost` 指容器
 
 数字映射、提示词、标签词表、模型、供应商和限制集中在 `notebook.yaml`。默认标签目标 2～5 个，可更少；标签和正文同次生成并一起确认。原样保存只保留已有标签。`primary` 默认使用示例 CLIProxyAPI 地址与 **待替换** 模型 ID、Responses、声明支持图片；`alternate` 演示第二个供应商与 `deepseek-chat`、Chat Completions、无图片能力。这些是可调整示例，不代表已验证你的服务提供这些模型。三个 AI 方案默认使用 `primary`，输出上限 8192；不默认发送思考等级或采样参数。
 
-参数优先级：模型默认值 < 方案覆盖 < 本次临时参数（应用接口已支持，未开发 Telegram 参数菜单）。扩展 `extra` 对象按层递归合并，最终同名扩展叶子覆盖普通参数。扩展不能替换输入、模型、工具、认证或服务端会话状态。未配置的可选参数不会发送。
+参数优先级：模型默认值 < 方案覆盖 < 本次临时参数（应用接口已支持，未开发 Telegram 参数菜单）。每一层先转换普通参数，再合并本层 `extra`，同层同名扩展叶子优先；三层转换结果依次递归合并，高层普通参数也能覆盖低层扩展参数。扩展不能替换输入、模型、工具、认证或服务端会话状态。未配置的可选参数不会发送。
 
 Responses 将上限映射到 `max_output_tokens`，思考等级到 `reasoning.effort`，详细程度到 `text.verbosity`。Chat Completions 默认 `max_completion_tokens`，可配置 `token_field: max_tokens`；思考等级和详细程度使用 `reasoning_effort` / `verbosity`。原生思考预算需同时配置模型的 `reasoning_budget_field`（例如 `thinking.budget_tokens`）和参数 `reasoning_budget`；这取决于实际中转支持，默认关闭。模型名带思考后缀时不能重复配置请求体思考参数。请求失败不自动重试或切换供应商。
 
