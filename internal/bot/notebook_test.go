@@ -166,6 +166,17 @@ func TestNotebookPrivateUserRestrictionAndExactEntryRules(t *testing.T) {
 	}
 }
 
+func TestNotebookSettingsLink(t *testing.T) {
+	cfg := notebookSettings(t)
+	tg := newFakeTelegram(t, nil)
+	s := newTestService(t, tg, Options{Notebook: cfg, WebURL: "https://settings.example.com"})
+	s.process(notebookMessage(1, "/settings"))
+	calls := tg.snapshot()
+	if len(calls) != 1 || len(calls[0].keyboard.InlineKeyboard) != 1 || calls[0].keyboard.InlineKeyboard[0][0].URL != "https://settings.example.com" || s.notebook.Status(notebookKey(42)).Count != 0 {
+		t.Fatalf("settings command did not return the web link: %+v", calls)
+	}
+}
+
 func TestNotebookPreservesCompleteSourceURLs(t *testing.T) {
 	link := "https://example.test/wiki/Go_(language)"
 	text := "😀 " + link + "。"

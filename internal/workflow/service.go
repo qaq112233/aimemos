@@ -80,22 +80,23 @@ type group struct {
 }
 type Service struct {
 	mu     sync.Mutex
-	cfg    *config.Notebook
+	cfg    config.NotebookSource
 	gen    Generator
 	dst    Destination
 	groups map[string]*group
 }
 
-func New(cfg *config.Notebook, gen Generator, dst Destination) *Service {
+func New(cfg config.NotebookSource, gen Generator, dst Destination) *Service {
 	return &Service{cfg: cfg, gen: gen, dst: dst, groups: make(map[string]*group)}
 }
 
 func (s *Service) view(key, notice string) View {
+	cfg := s.cfg.Current()
 	v := View{Notice: notice}
 	if g := s.groups[key]; g != nil {
 		v.Group, v.Count, v.Draft, v.Model = g.id, len(g.materials), g.draft, g.model
 		if v.Model == "" && g.profile != "" {
-			v.Model = s.cfg.Profiles[g.profile].Model
+			v.Model = cfg.Profiles[g.profile].Model
 		}
 		v.Collecting, v.Generating, v.Saving = g.collecting, g.generating, g.saving
 		v.Partial, v.Memo = g.memo.Name != "", g.memo
@@ -129,10 +130,11 @@ func (s *Service) Status(key string) View {
 }
 
 func (s *Service) Add(key string, m Material) (View, error) {
+	cfg := s.cfg.Current()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.groups[key] == nil {
-		if len(m.Text) > s.cfg.MaxTextBytes {
+		if len(m.Text) > cfg.MaxTextBytes {
 			return s.view(key, ""), errors.New("素材已达配置上限，请先缩短素材")
 		}
 		s.groups[key] = &group{id: uuid.NewString()[:12], collecting: true}
@@ -153,7 +155,7 @@ func (s *Service) Add(key string, m Material) (View, error) {
 	for _, old := range g.materials {
 		total += len(old.Text)
 	}
-	if len(g.materials) >= s.cfg.MaxMaterials || total > s.cfg.MaxTextBytes {
+	if len(g.materials) >= cfg.MaxMaterials || total > cfg.MaxTextBytes {
 		return s.view(key, ""), errors.New("素材已达配置上限，请先处理本组")
 	}
 	m.Sources, m.Attachments = slices.Clone(m.Sources), slices.Clone(m.Attachments)
@@ -179,9 +181,10 @@ func (s *Service) Collect(key, id string) (View, error) {
 }
 
 func (s *Service) SelectModel(key, model string) (View, error) {
+	cfg := s.cfg.Current()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.cfg.Models[model]; !ok {
+	if _, ok := cfg.Models[model]; !ok {
 		return s.view(key, ""), errors.New("未知模型，请使用 /model 查看配置名称")
 	}
 	if err := s.check(key, ""); err != nil {
@@ -214,6 +217,7 @@ func (s *Service) Discard(key, id string) (View, error) {
 // BeginGenerate takes the snapshot before returning. The caller runs the work
 // separately, leaving Add available while network requests are in flight.
 func (s *Service) BeginGenerate(key, id, profile, instruction string, temporary config.Parameters) (View, func(context.Context) View, error) {
+	cfg := s.cfg.Current()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.check(key, id); err != nil {
@@ -229,7 +233,7 @@ func (s *Service) BeginGenerate(key, id, profile, instruction string, temporary 
 	if profile == "" {
 		profile = g.profile
 	}
-	p, ok := s.cfg.Profiles[profile]
+	p, ok := cfg.Profiles[profile]
 	if !ok {
 		return s.view(key, ""), nil, errors.New("请先选择整理方案")
 	}
@@ -237,7 +241,7 @@ func (s *Service) BeginGenerate(key, id, profile, instruction string, temporary 
 	if model == "" {
 		model = p.Model
 	}
-	m := s.cfg.Models[model]
+	m := cfg.Models[model]
 	if p.Images && !m.Vision {
 		return s.view(key, ""), nil, errors.New("此模型不支持图片，请切换模型或选择关闭读图的方案")
 	}
@@ -249,7 +253,7 @@ func (s *Service) BeginGenerate(key, id, profile, instruction string, temporary 
 			}
 		}
 	}
-	if p.Images && images > s.cfg.MaxImages {
+	if p.Images && images > cfg.MaxImages {
 		return s.view(key, ""), nil, errors.New("图片数量超过 max_images，请选择关闭读图的方案或调整配置")
 	}
 	if instruction != "" {

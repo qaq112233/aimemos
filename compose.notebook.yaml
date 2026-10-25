@@ -10,6 +10,9 @@ services:
     environment:
       NOTEBOOK_CONFIG: /app/notebook.yaml
       DATA: /data/data.txt
+      WEB_ADDR: 0.0.0.0:8080
+    ports:
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./notebook.yaml:/app/notebook.yaml:ro
       - memogram-data:/data

@@ -49,9 +49,16 @@ func (s *Service) handleNotebookMessage(ctx context.Context, u *models.Update) {
 		case text == "/start" || text == "/status":
 			s.showNotebook(ctx, m.Chat.ID, v, true)
 			return
+		case text == "/settings":
+			if s.webURL == "" {
+				s.reply(ctx, m.Chat.ID, "请先设置 WEB_URL 为你的网页配置 HTTPS 地址")
+				return
+			}
+			s.send(ctx, &bot.SendMessageParams{ChatID: m.Chat.ID, Text: "使用独立密码登录网页配置。首次打开请先设置密码。", ReplyMarkup: &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "打开网页配置", URL: s.webURL}}}}})
+			return
 		case text == "/model":
-			names := make([]string, 0, len(s.notebookCfg.Models))
-			for name := range s.notebookCfg.Models {
+			names := make([]string, 0, len(s.notebookCfg.Current().Models))
+			for name := range s.notebookCfg.Current().Models {
 				names = append(names, name)
 			}
 			slices.Sort(names)
@@ -70,7 +77,7 @@ func (s *Service) handleNotebookMessage(ctx context.Context, u *models.Update) {
 			return
 		}
 		if v.Collecting && !v.Generating {
-			if entry, prompt, ok := parseEntry(s.notebookCfg, text); ok {
+			if entry, prompt, ok := parseEntry(s.notebookCfg.Current(), text); ok {
 				s.runEntry(ctx, m.Chat.ID, key, v.Group, entry, prompt)
 				return
 			}
@@ -93,7 +100,7 @@ func (s *Service) handleNotebookMessage(ctx context.Context, u *models.Update) {
 	}
 	// This interval throttles status only. It never triggers generation/save
 	// or splits an album/group. /status always shows the exact count.
-	if v.Count == 1 || v.Generating || v.Draft.Version > 0 || time.Since(s.statusAt[m.Chat.ID]) >= s.notebookCfg.StatusEvery {
+	if v.Count == 1 || v.Generating || v.Draft.Version > 0 || time.Since(s.statusAt[m.Chat.ID]) >= s.notebookCfg.Current().StatusEvery {
 		s.statusAt[m.Chat.ID] = time.Now()
 		s.showNotebook(ctx, m.Chat.ID, v, false)
 	}
@@ -138,7 +145,7 @@ func (s *Service) handleNotebookCallback(ctx context.Context, _ *bot.Bot, u *mod
 	var err error
 	switch parts[1] {
 	case "entry":
-		entry, ok := s.notebookCfg.Entries[parts[3]]
+		entry, ok := s.notebookCfg.Current().Entries[parts[3]]
 		if !ok {
 			return
 		}
@@ -217,13 +224,13 @@ func (s *Service) showNotebook(ctx context.Context, chatID int64, v workflow.Vie
 			rows = append(rows, []models.InlineKeyboardButton{button("重试补传附件", "save", strconv.Itoa(v.Draft.Version))})
 		} else {
 			if v.Collecting {
-				keys := make([]string, 0, len(s.notebookCfg.Entries))
-				for key := range s.notebookCfg.Entries {
+				keys := make([]string, 0, len(s.notebookCfg.Current().Entries))
+				for key := range s.notebookCfg.Current().Entries {
 					keys = append(keys, key)
 				}
 				slices.Sort(keys)
 				for _, key := range keys {
-					rows = append(rows, []models.InlineKeyboardButton{button(key+" "+s.notebookCfg.Entries[key].Label, "entry", key)})
+					rows = append(rows, []models.InlineKeyboardButton{button(key+" "+s.notebookCfg.Current().Entries[key].Label, "entry", key)})
 				}
 			}
 			if v.Draft.Version > 0 && !v.Draft.Truncated {
@@ -354,7 +361,7 @@ func (s *Service) fetchNotebookFile(ctx context.Context, a workflow.Attachment) 
 type notebookDestination struct{ s *Service }
 
 func (d notebookDestination) Create(ctx context.Context, content string) (workflow.Memo, error) {
-	memo, err := d.s.memos.WithAccessToken(d.s.notebookCfg.MemosToken).CreateMemo(ctx, memosapi.Memo{Content: content})
+	memo, err := d.s.memos.WithAccessToken(d.s.notebookCfg.Current().MemosToken).CreateMemo(ctx, memosapi.Memo{Content: content})
 	if err != nil {
 		return workflow.Memo{}, errors.New("请检查 Memos 连接和访问令牌")
 	}
@@ -365,5 +372,5 @@ func (d notebookDestination) Create(ctx context.Context, content string) (workfl
 	return workflow.Memo{Name: memo.Name, URL: d.s.linkBase + "/memos/" + id}, nil
 }
 func (d notebookDestination) Upload(ctx context.Context, memo workflow.Memo, a workflow.Attachment) error {
-	return d.s.saveAttachment(ctx, d.s.memos.WithAccessToken(d.s.notebookCfg.MemosToken), telegramFile{id: a.ID, name: a.Name, mimeType: a.MIME}, &memosapi.Memo{Name: memo.Name})
+	return d.s.saveAttachment(ctx, d.s.memos.WithAccessToken(d.s.notebookCfg.Current().MemosToken), telegramFile{id: a.ID, name: a.Name, mimeType: a.MIME}, &memosapi.Memo{Name: memo.Name})
 }

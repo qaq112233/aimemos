@@ -140,7 +140,7 @@ func newTestService(t *testing.T, telegram http.Handler, opts Options) *Service 
 	t.Cleanup(server.Close)
 	if opts.Access.Validate() != nil {
 		if opts.Notebook != nil {
-			opts.Access = opts.Notebook.Access
+			opts.Access = opts.Notebook.Current().Access
 		} else {
 			opts.Access = config.Access{AllowAll: true}
 		}

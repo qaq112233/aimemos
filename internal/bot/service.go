@@ -36,8 +36,9 @@ type UserStore interface {
 type Options struct {
 	// Notebook enables the explicit-save workflow with private user sessions instead of
 	// upstream's immediate capture. NewGenerator receives token-safe file bytes.
-	Notebook     *config.Notebook
+	Notebook     config.NotebookSource
 	NewGenerator func(workflow.Fetch) workflow.Generator
+	WebURL       string
 	// Token is the Telegram bot token.
 	Token string
 	// ServerURL optionally replaces the Telegram Bot API server.
@@ -60,8 +61,9 @@ type Options struct {
 
 type Service struct {
 	notebook    *workflow.Service
-	notebookCfg *config.Notebook
+	notebookCfg config.NotebookSource
 	statusAt    map[int64]time.Time
+	webURL      string
 	bot         *bot.Bot
 	memos       *memos.Client
 	store       UserStore
@@ -105,6 +107,7 @@ func New(opts Options) (*Service, error) {
 		downloads: opts.Downloads,
 		access:    opts.Access,
 		statusAt:  make(map[int64]time.Time),
+		webURL:    opts.WebURL,
 		albums:    newMediaGroups(albumTTL),
 		linkBase:  opts.Memos.BaseURL(),
 	}
@@ -180,6 +183,9 @@ func (s *Service) Start(ctx context.Context) {
 	}
 	if s.notebook != nil {
 		commands = []models.BotCommand{{Command: "start", Description: "查看笔记机器人用法"}, {Command: "status", Description: "查看当前素材和草稿"}, {Command: "model", Description: "查看或切换模型"}, {Command: "retry", Description: "重试上次整理"}}
+	}
+	if s.notebook != nil && s.webURL != "" {
+		commands = append(commands, models.BotCommand{Command: "settings", Description: "打开网页配置"})
 	}
 	if _, err := s.bot.SetMyCommands(ctx, &bot.SetMyCommandsParams{Commands: commands}); err != nil {
 		slog.Error("failed to set bot commands", slog.Any("err", redactTelegramError(err)))

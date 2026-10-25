@@ -15,34 +15,41 @@ import (
 	"github.com/usememos/memogram/internal/netproxy"
 )
 
-// Notebook is fixed configuration. Secrets are resolved only from environment
-// references; session contents and model selections never go into this file.
+// Notebook holds AI configuration. Runtime credentials and session state are
+// excluded from serialized settings.
+type NotebookSource interface {
+	Current() *Notebook
+}
+
+func (c *Notebook) Current() *Notebook { return c }
+
 type Notebook struct {
-	UserIDEnv     string              `yaml:"user_id_env"`
-	MemosTokenEnv string              `yaml:"memos_token_env"`
-	StatusEvery   time.Duration       `yaml:"status_every"`
-	MaxMaterials  int                 `yaml:"max_materials"`
-	MaxTextBytes  int                 `yaml:"max_text_bytes"`
-	MaxImages     int                 `yaml:"max_images"`
-	Providers     map[string]Provider `yaml:"providers"`
-	Models        map[string]Model    `yaml:"models"`
-	Profiles      map[string]Profile  `yaml:"profiles"`
-	Entries       map[string]Entry    `yaml:"entries"`
-	SystemPrompt  string              `yaml:"system_prompt"`
-	TagPrompt     string              `yaml:"tag_prompt"`
-	CommonTags    []string            `yaml:"common_tags"`
-	Access        Access              `yaml:"-"`
-	MemosToken    string              `yaml:"-"`
-	ProxyURL      string              `yaml:"-"` // Shared PROXY_URL, supplied by startup configuration.
+	UserIDEnv     string              `yaml:"user_id_env" json:"user_id_env"`
+	MemosTokenEnv string              `yaml:"memos_token_env" json:"memos_token_env"`
+	StatusEvery   time.Duration       `yaml:"status_every" json:"status_every"`
+	MaxMaterials  int                 `yaml:"max_materials" json:"max_materials"`
+	MaxTextBytes  int                 `yaml:"max_text_bytes" json:"max_text_bytes"`
+	MaxImages     int                 `yaml:"max_images" json:"max_images"`
+	Providers     map[string]Provider `yaml:"providers" json:"providers"`
+	Models        map[string]Model    `yaml:"models" json:"models"`
+	Profiles      map[string]Profile  `yaml:"profiles" json:"profiles"`
+	Entries       map[string]Entry    `yaml:"entries" json:"entries"`
+	SystemPrompt  string              `yaml:"system_prompt" json:"system_prompt"`
+	TagPrompt     string              `yaml:"tag_prompt" json:"tag_prompt"`
+	CommonTags    []string            `yaml:"common_tags" json:"common_tags"`
+	Access        Access              `yaml:"-" json:"-"`
+	MemosToken    string              `yaml:"-" json:"-"`
+	ProxyURL      string              `yaml:"-" json:"-"` // Shared PROXY_URL, supplied by startup configuration.
 }
 
 type Provider struct {
-	BaseURL  string            `yaml:"base_url"`
-	KeyEnv   string            `yaml:"key_env"`
-	Timeout  time.Duration     `yaml:"timeout"`
-	Headers  map[string]string `yaml:"headers"`
-	ProxyURL string            `yaml:"proxy_url"`
-	ProxyEnv string            `yaml:"proxy_env"`
+	APIKey   string            `yaml:"-" json:"-"`
+	BaseURL  string            `yaml:"base_url" json:"base_url"`
+	KeyEnv   string            `yaml:"key_env" json:"key_env"`
+	Timeout  time.Duration     `yaml:"timeout" json:"timeout"`
+	Headers  map[string]string `yaml:"headers" json:"headers"`
+	ProxyURL string            `yaml:"proxy_url" json:"proxy_url"`
+	ProxyEnv string            `yaml:"proxy_env" json:"proxy_env"`
 }
 
 // NetworkProxy resolves a provider override without exposing proxy credentials.
@@ -68,39 +75,39 @@ func (p Provider) NetworkProxy(shared string) (string, error) {
 }
 
 type Model struct {
-	Provider             string     `yaml:"provider"`
-	ID                   string     `yaml:"id"`
-	Protocol             string     `yaml:"protocol"`
-	Vision               bool       `yaml:"vision"`
-	TokenField           string     `yaml:"token_field"`
-	ReasoningBudgetField string     `yaml:"reasoning_budget_field"`
-	Defaults             Parameters `yaml:"parameters"`
+	Provider             string     `yaml:"provider" json:"provider"`
+	ID                   string     `yaml:"id" json:"id"`
+	Protocol             string     `yaml:"protocol" json:"protocol"`
+	Vision               bool       `yaml:"vision" json:"vision"`
+	TokenField           string     `yaml:"token_field" json:"token_field"`
+	ReasoningBudgetField string     `yaml:"reasoning_budget_field" json:"reasoning_budget_field"`
+	Defaults             Parameters `yaml:"parameters" json:"parameters"`
 }
 
 type Profile struct {
-	Name       string     `yaml:"name"`
-	Prompt     string     `yaml:"prompt"`
-	Model      string     `yaml:"model"`
-	Images     bool       `yaml:"images"`
-	Tags       bool       `yaml:"tags"`
-	Parameters Parameters `yaml:"parameters"`
+	Name       string     `yaml:"name" json:"name"`
+	Prompt     string     `yaml:"prompt" json:"prompt"`
+	Model      string     `yaml:"model" json:"model"`
+	Images     bool       `yaml:"images" json:"images"`
+	Tags       bool       `yaml:"tags" json:"tags"`
+	Parameters Parameters `yaml:"parameters" json:"parameters"`
 }
 
 type Entry struct {
-	Label   string `yaml:"label"`
-	Action  string `yaml:"action"` // raw or generate
-	Profile string `yaml:"profile"`
-	Custom  bool   `yaml:"custom"` // requires "entry prompt", never prefix matching
+	Label   string `yaml:"label" json:"label"`
+	Action  string `yaml:"action" json:"action"` // raw or generate
+	Profile string `yaml:"profile" json:"profile"`
+	Custom  bool   `yaml:"custom" json:"custom"` // requires "entry prompt", never prefix matching
 }
 
 type Parameters struct {
-	MaxTokens       *int64         `yaml:"max_tokens"`
-	ReasoningEffort *string        `yaml:"reasoning_effort"`
-	ReasoningBudget *int64         `yaml:"reasoning_budget"`
-	Temperature     *float64       `yaml:"temperature"`
-	TopP            *float64       `yaml:"top_p"`
-	Verbosity       *string        `yaml:"verbosity"`
-	Extra           map[string]any `yaml:"extra"`
+	MaxTokens       *int64         `yaml:"max_tokens" json:"max_tokens"`
+	ReasoningEffort *string        `yaml:"reasoning_effort" json:"reasoning_effort"`
+	ReasoningBudget *int64         `yaml:"reasoning_budget" json:"reasoning_budget"`
+	Temperature     *float64       `yaml:"temperature" json:"temperature"`
+	TopP            *float64       `yaml:"top_p" json:"top_p"`
+	Verbosity       *string        `yaml:"verbosity" json:"verbosity"`
+	Extra           map[string]any `yaml:"extra" json:"extra"`
 }
 
 // MergeMap recursively merges structured protocol fields without sharing maps.

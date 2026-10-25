@@ -2,13 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/usememos/memogram/internal/admin"
 	"github.com/usememos/memogram/internal/ai"
 	"github.com/usememos/memogram/internal/bot"
 	"github.com/usememos/memogram/internal/config"
@@ -64,9 +69,36 @@ func run() int {
 		Access:    cfg.Access,
 	}
 	if notebook := cfg.Notebook; notebook != nil {
-		opts.Notebook = notebook
 		notebook.ProxyURL = cfg.ProxyURL
-		opts.NewGenerator = func(fetch workflow.Fetch) workflow.Generator { return ai.New(notebook, fetch) }
+		settings, err := admin.OpenSettings(cfg.WebDataPath, notebook)
+		if err != nil {
+			slog.Error("读取网页设置失败", slog.Any("err", err))
+			return 1
+		}
+		if cfg.WebAddr != "" {
+			handler, err := admin.NewHandler(settings)
+			if err != nil {
+				slog.Error("初始化网页配置失败", slog.Any("err", err))
+				return 1
+			}
+			listener, err := net.Listen("tcp", cfg.WebAddr)
+			if err != nil {
+				slog.Error("启动网页配置失败", slog.Any("err", err))
+				return 1
+			}
+			server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16 << 10}
+			defer func() { _ = server.Close() }()
+			go func() {
+				if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					slog.Error("网页服务退出", slog.Any("err", err))
+					stop()
+				}
+			}()
+			slog.Info("网页配置已启动，请通过 HTTPS 反向代理访问", slog.String("listen", listener.Addr().String()))
+			opts.WebURL = cfg.WebURL
+		}
+		opts.Notebook = settings
+		opts.NewGenerator = func(fetch workflow.Fetch) workflow.Generator { return ai.New(settings, fetch) }
 	}
 	service, err := bot.New(opts)
 	if err != nil {

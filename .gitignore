@@ -6,4 +6,5 @@ dist/
 data.txt
 data/
 notebook.yaml
+web-settings.json
 __pycache__/

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -30,9 +32,12 @@ type Config struct {
 	// TelegramProxyURL overrides the shared proxy (TELEGRAM_PROXY_URL).
 	TelegramProxyURL string
 	// DataPath is the file that stores user bindings (DATA).
-	DataPath string
-	Access   Access
-	Notebook *Notebook
+	DataPath    string
+	Access      Access
+	Notebook    *Notebook
+	WebAddr     string
+	WebURL      string
+	WebDataPath string
 }
 
 // Load reads the configuration from the environment, after loading a .env
@@ -84,6 +89,21 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 			return nil, fmt.Errorf("NOTEBOOK_CONFIG: %w", err)
 		}
 		cfg.Access = cfg.Notebook.Access
+		cfg.WebAddr = strings.TrimSpace(getenv("WEB_ADDR"))
+		if cfg.WebAddr == "" {
+			cfg.WebAddr = "127.0.0.1:8080"
+		}
+		if cfg.WebAddr == "off" {
+			cfg.WebAddr = ""
+		}
+		cfg.WebDataPath = filepath.Join(filepath.Dir(cfg.DataPath), "web-settings.json")
+		cfg.WebURL = strings.TrimSpace(getenv("WEB_URL"))
+		if cfg.WebURL != "" {
+			u, err := url.Parse(cfg.WebURL)
+			if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+				return nil, errors.New("WEB_URL 必须是公网 HTTPS 地址")
+			}
+		}
 	} else {
 		cfg.Access, err = readAccess(getenv, "")
 		if err != nil {

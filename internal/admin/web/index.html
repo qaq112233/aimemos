@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Memogram · 配置中心</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main id="auth" class="auth-wrap" hidden>
+    <section class="auth-card">
+      <div class="mark">M</div>
+      <p class="eyebrow">MEMOGRAM</p>
+      <h1 id="auth-title">登录配置中心</h1>
+      <p id="auth-description" class="muted">使用你的独立管理密码登录。</p>
+      <form id="auth-form">
+        <label>管理密码<input id="password" type="password" autocomplete="current-password" required></label>
+        <label id="confirm-wrap" hidden>再次输入密码<input id="confirm-password" type="password" autocomplete="new-password"></label>
+        <button class="primary wide" id="auth-submit" type="submit">登录</button>
+        <p id="auth-error" class="error" role="alert"></p>
+      </form>
+      <p class="footnote">密码独立于 Telegram、Memos 和 AI 供应商。</p>
+    </section>
+  </main>
+  <div id="app" class="shell" hidden>
+    <aside class="sidebar">
+      <div class="brand"><span class="mark small">M</span><div>Memogram<small>配置中心</small></div></div>
+      <nav id="navigation" aria-label="配置分类"></nav>
+      <div class="sidebar-footer"><span class="dot"></span>独立密码保护<button id="logout" class="text-button">退出登录</button></div>
+    </aside>
+    <main class="workspace">
+      <header class="page-header"><div><p class="eyebrow">WORKSPACE SETTINGS</p><h1 id="page-title">AI 供应商</h1><p id="page-description" class="muted"></p></div><button id="save" class="primary">保存更改</button></header>
+      <div id="notice" role="status" aria-live="polite" hidden></div>
+      <div id="editor"></div>
+      <p class="page-footer">设置保存在服务器数据目录，重启后保留。AI 密钥不会在页面中回显。</p>
+    </main>
+  </div>
+  <div id="loading" class="loading">正在打开配置中心…</div>
+</body>
+</html>

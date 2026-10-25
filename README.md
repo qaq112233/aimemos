@@ -1,6 +1,6 @@
 # AIMemos / Memogram
 
-通过 Telegram 收集文字、网址、图片和文件，交给 AI 整理成 Markdown 草稿，确认后保存到 Memos。当前版本 **v0.2.0**，支持多图理解、草稿修改、多供应商和两种 AI 协议。
+通过 Telegram 收集文字、网址、图片和文件，交给 AI 整理成 Markdown 草稿，确认后保存到 Memos。当前版本 **v0.3.0**，支持多图理解、草稿修改、多供应商和两种 AI 协议。
 
 项目基于 [usememos/telegram-integration](https://github.com/usememos/telegram-integration)，保留上游历史与即时保存模式；程序和发布文件仍使用 `memogram` 名称。
 
@@ -14,6 +14,7 @@
 AI 笔记模式只接受私聊，素材、草稿、模型选择和确认按钮按 Telegram 用户隔离。内存中的未保存内容会随进程重启丢失。网址只保留链接和附带文字，不抓取网页正文。
 
 - [AI 笔记模式与图片理解](README_NOTEBOOK.md)
+- [网页配置与独立密码](docs/WEB_SETTINGS.md)
 - [更新日志与升级事项](CHANGELOG.md)
 - [开发、测试与发布](docs/DEVELOPMENT.md)
 - [功能约定](docs/REQUIREMENTS.md)
@@ -70,15 +71,17 @@ chmod 600 .env
 ## 使用发布的 Docker 镜像
 
 ```sh
-docker pull ghcr.io/qaq112233/aimemos:v0.2.0
+docker pull ghcr.io/qaq112233/aimemos:v0.3.0
 docker volume create memogram-data
 docker run -d --name memogram --restart unless-stopped \
   --env-file .env \
   --add-host host.docker.internal:host-gateway \
   -e DATA=/data/data.txt \
+  -e WEB_ADDR=0.0.0.0:8080 \
+  -p 127.0.0.1:8080:8080 \
   -v memogram-data:/data \
   -v "$PWD/notebook.yaml:/app/notebook.yaml:ro" \
-  ghcr.io/qaq112233/aimemos:v0.2.0
+  ghcr.io/qaq112233/aimemos:v0.3.0
 docker logs -f memogram
 ```
 
@@ -89,7 +92,7 @@ docker logs -f memogram
 更新镜像时保留 `.env`、`notebook.yaml` 和数据卷：
 
 ```sh
-docker pull ghcr.io/qaq112233/aimemos:v0.2.0
+docker pull ghcr.io/qaq112233/aimemos:v0.3.0
 docker stop memogram
 docker rm memogram
 # 使用上面的 docker run 命令重新创建容器，复用原有数据卷。
@@ -123,6 +126,7 @@ AI 笔记模式中，连续发送的素材留在同一组；四秒状态提示�
 | 普通文字 | 有草稿时作为修改要求；收集状态作为素材 |
 | 确认保存 / 补充素材 / 放弃本组 | 按钮操作当前用户的素材组和草稿 |
 | `/status`、`/model`、`/retry` | 查看状态、选择模型、重试整理 |
+| `/settings` | 打开配置好的网页地址，使用独立密码登录 |
 
 即时保存模式支持文字、图片、文件、语音、视频、相册，另有 `/search <关键词>` 和 `/space`。保存后的按钮可切换可见性、置顶或所属空间。进入空间的笔记对该空间成员可见。
 
@@ -136,6 +140,8 @@ AI 笔记模式中，连续发送的素材留在同一组；四秒状态提示�
 | `ALLOWED_USER_IDS` | 允许的正整数用户 ID 列表，逗号分隔 |
 | `TELEGRAM_USER_ID` | 兼容旧配置的 ID 字段，与 `ALLOWED_USER_IDS` 合并 |
 | `NOTEBOOK_CONFIG` | AI 笔记模式 YAML 路径，留空启用即时保存模式 |
+| `WEB_ADDR` | 笔记模式的网页监听地址，默认 `127.0.0.1:8080`；`off` 关闭网页入口 |
+| `WEB_URL` | 网页配置的公网 HTTPS 地址，用于机器人 `/settings` 按钮 |
 | `MEMOS_TOKEN` | AI 笔记模式必填，Memos 个人访问令牌 |
 | `CLIPROXY_API_KEY`、`COMPATIBLE_API_KEY` | 示例供应商密钥；实际名称由 `key_env` 决定 |
 | `PROXY_URL` | Telegram 和未单独配置的 AI 供应商共用的网络代理 |
@@ -145,7 +151,7 @@ AI 笔记模式中，连续发送的素材留在同一组；四秒状态提示�
 
 代理支持 HTTP、HTTPS、SOCKS5 和 `socks5h`，可包含用户名和密码。`direct` 强制直连；专用项留空时继承统一代理。所有层都未指定时，沿用 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`。供应商专用代理见[笔记模式配置](README_NOTEBOOK.md#网络代理)。
 
-## 升级到 v0.2.0
+## 升级到 v0.3.0
 
 1. 填写允许用户；旧版依赖空名单开放访问的部署必须调整，只有显式 `none` 才开放。
 2. 原有 `TELEGRAM_USER_ID` 仍可继续使用；仅按用户名授权也能运行 AI 笔记模式。

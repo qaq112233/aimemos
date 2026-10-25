@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -25,27 +26,38 @@ import (
 )
 
 type Client struct {
-	cfg     *config.Notebook
-	fetch   workflow.Fetch
-	mu      sync.Mutex
-	clients map[string]*http.Client
+	cfg            config.NotebookSource
+	fetch          workflow.Fetch
+	mu             sync.Mutex
+	clients        map[string]*http.Client
+	clientSettings map[string]struct {
+		proxy   string
+		timeout time.Duration
+	}
 }
 
-func New(cfg *config.Notebook, fetch workflow.Fetch) *Client {
-	return &Client{cfg: cfg, fetch: fetch, clients: make(map[string]*http.Client)}
+func New(cfg config.NotebookSource, fetch workflow.Fetch) *Client {
+	return &Client{cfg: cfg, fetch: fetch, clients: make(map[string]*http.Client), clientSettings: make(map[string]struct {
+		proxy   string
+		timeout time.Duration
+	})}
 }
 
 // Reuse each provider's connection pool rather than leaving a new proxy
 // transport and its idle connections behind after every generation.
-func (c *Client) providerClient(name string, p config.Provider) (*http.Client, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if client := c.clients[name]; client != nil {
-		return client, nil
-	}
-	proxyURL, err := p.NetworkProxy(c.cfg.ProxyURL)
+func (c *Client) providerClient(name string, p config.Provider, sharedProxy string) (*http.Client, error) {
+	proxyURL, err := p.NetworkProxy(sharedProxy)
 	if err != nil {
 		return nil, fmt.Errorf("供应商 %s 代理配置无效：%w", name, err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	settings := c.clientSettings[name]
+	if client := c.clients[name]; client != nil {
+		if settings.proxy == proxyURL && settings.timeout == p.Timeout {
+			return client, nil
+		}
+		client.CloseIdleConnections()
 	}
 	transport, err := netproxy.Transport(proxyURL)
 	if err != nil {
@@ -53,15 +65,20 @@ func (c *Client) providerClient(name string, p config.Provider) (*http.Client, e
 	}
 	client := &http.Client{Timeout: p.Timeout, Transport: transport}
 	c.clients[name] = client
+	c.clientSettings[name] = struct {
+		proxy   string
+		timeout time.Duration
+	}{proxyURL, p.Timeout}
 	return client, nil
 }
 
 func (c *Client) Generate(ctx context.Context, req workflow.Request) (workflow.Result, error) {
-	m, ok := c.cfg.Models[req.Model]
+	cfg := c.cfg.Current()
+	m, ok := cfg.Models[req.Model]
 	if !ok {
 		return workflow.Result{}, errors.New("未知模型")
 	}
-	p := c.cfg.Providers[m.Provider]
+	p := cfg.Providers[m.Provider]
 	layers := []config.Parameters{m.Defaults, req.Profile.Parameters, req.Parameters}
 	budget := false
 	for _, layer := range layers {
@@ -82,11 +99,14 @@ func (c *Client) Generate(ctx context.Context, req workflow.Request) (workflow.R
 			return workflow.Result{}, errors.New("模型名已带思考后缀，请移除后缀或请求体中的重复思考设置")
 		}
 	}
-	key := os.Getenv(p.KeyEnv)
+	key := p.APIKey
+	if key == "" {
+		key = os.Getenv(p.KeyEnv)
+	}
 	if p.KeyEnv != "" && key == "" {
 		return workflow.Result{}, fmt.Errorf("请设置供应商 %s 的 %s 环境变量", m.Provider, p.KeyEnv)
 	}
-	httpClient, err := c.providerClient(m.Provider, p)
+	httpClient, err := c.providerClient(m.Provider, p, cfg.ProxyURL)
 	if err != nil {
 		return workflow.Result{}, err
 	}
@@ -98,9 +118,9 @@ func (c *Client) Generate(ctx context.Context, req workflow.Request) (workflow.R
 	for name, value := range p.Headers {
 		opts = append(opts, option.WithHeader(name, value))
 	}
-	system := c.cfg.SystemPrompt + "\n\n" + req.Profile.Prompt
+	system := cfg.SystemPrompt + "\n\n" + req.Profile.Prompt
 	if req.Profile.Tags {
-		system += "\n\n" + c.cfg.TagPrompt + "\n常用标签：" + strings.Join(c.cfg.CommonTags, ", ")
+		system += "\n\n" + cfg.TagPrompt + "\n常用标签：" + strings.Join(cfg.CommonTags, ", ")
 	}
 	// Do not include Telegram file IDs or download URLs in model inputs.
 	type source struct {

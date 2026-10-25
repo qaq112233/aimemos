@@ -130,7 +130,7 @@ def main(proxy_mode="direct"):
             env = dict(os.environ, SERVER_ADDR=base, BOT_PROXY_ADDR=telegram_base, BOT_TOKEN="123:local-test",
                        PROXY_URL=shared_proxy, TELEGRAM_PROXY_URL=base if proxy_mode == "separate" else "",
                        ALLOWED_USERNAMES="", ALLOWED_USER_IDS="", TELEGRAM_USER_ID="42", MEMOS_TOKEN="local-test", CLIPROXY_API_KEY="local-test",
-                       DATA=str(Path(tmp) / "bindings.txt"), NOTEBOOK_CONFIG=str(config))
+                       DATA=str(Path(tmp) / "bindings.txt"), NOTEBOOK_CONFIG=str(config), WEB_ADDR="127.0.0.1:0", WEB_URL="")
             process = subprocess.Popen([str(binary)], cwd=tmp, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             try:
                 if not finished.wait(10):

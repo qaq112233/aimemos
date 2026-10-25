@@ -17,7 +17,7 @@ sh scripts/build.sh
 普通开发构建从 Git 提交时间和提交号生成版本。发布构建显式指定：
 
 ```sh
-MEMOGRAM_VERSION=v0.2.0 sh scripts/build.sh
+MEMOGRAM_VERSION=v0.3.0 sh scripts/build.sh
 ./build/memogram --check-config notebook.example.yaml
 ```
 
@@ -44,6 +44,7 @@ sh scripts/build.sh compose up -d --build
 | --- | --- |
 | `cmd/memogram` | 读取配置、连接各模块、处理退出信号 |
 | `internal/config` | 环境变量、允许用户、AI YAML 与参数校验 |
+| `internal/admin` | 内嵌配置网页、独立密码登录和私有配置文件 |
 | `internal/bot` | Telegram 消息、附件、相册、命令和按钮 |
 | `internal/workflow` | 按用户隔离的内存素材组、快照、草稿和保存状态 |
 | `internal/ai` | 官方 Go SDK、Responses / Chat Completions、图片数据与参数映射 |
@@ -85,16 +86,16 @@ docker rm -f memogram-memos-test
 
 未设置 `MEMOS_TEST_URL` 时，该测试自动跳过。已有用户的实例会被拒绝。CI 对 `canary`、`0.30.0`、`0.31.0` 分别执行；附件上传后下载并逐字节比较。语音和视频仅验证传输，不验证播放。
 
-## 发布 v0.2.0
+## 发布 v0.3.0
 
 发布标签采用 `v主版本.次版本.修订号`；候选版本使用 `-rc.1` 等后缀，并标记为预发布。程序打印不带 `v` 的版本及源码提交号。保留对历史上游日期版本的解析。
 
 1. 验证代码、配置示例和中文文档，提交并推送到本仓库 `main`。
-2. 确认 `v0.2.0` 标签指向本次提交。继承的本地上游标签可能指向旧代码，不能据此发布。
+2. 确认 `v0.3.0` 标签指向本次提交。继承的本地上游标签可能指向旧代码，不能据此发布。
 3. 在本仓库创建并发布 GitHub Release，填写中文标题、更新内容和升级事项。
 4. 等待 `CI` 和 `Build and publish` 完成，检查压缩包与 GHCR 的架构、版本和源码提交号。
 
-`Build and publish` 只在发布 Release 或手动运行时执行。发布稳定版会上传压缩包、构建 `linux/amd64` 与 `linux/arm64` 镜像，并更新 `v0.2.0`、`0.2.0`、`latest` 标签。预发布和手动构建不会更新 `latest`。手动构建默认版本为 `v0.2.0`，会推送镜像，但不会创建 Release 或远程 Git 标签。
+`Build and publish` 只在发布 Release 或手动运行时执行。发布稳定版会上传压缩包、构建 `linux/amd64` 与 `linux/arm64` 镜像，并更新 `v0.3.0`、`0.3.0`、`latest` 标签。预发布和手动构建不会更新 `latest`。手动构建默认版本为 `v0.3.0`，会推送镜像，但不会创建 Release 或远程 Git 标签。
 
 流程使用仓库 `GITHUB_TOKEN` 上传附件和推送 GHCR，无需另外保存注册表密钥。镜像如需匿名拉取，GHCR 软件包需设为公开。重复使用版本会替换对应镜像标签，日后应使用新版本。
 
@@ -107,7 +108,7 @@ python3 scripts/test-release.py
 
 脚本在临时克隆中打包稳定版、候选版和历史日期版本，检查本机压缩包中的二进制版本；不会发布或修改原仓库标签。跨架构编译会占用较多资源，建议交给 GitHub Actions。本地脚本按单个目标顺序打包，默认 `GOMAXPROCS=2`、`GOFLAGS=-p=2`；不要在资源受限的 WSL 中同时运行多个构建和静态检查。
 
-直接构建 Docker 时必须提供 `VERSION=0.2.0` 和 `COMMIT=<源码提交号>`，因为 Docker 上下文不包含 `.git`。
+直接构建 Docker 时必须提供 `VERSION=0.3.0` 和 `COMMIT=<源码提交号>`，因为 Docker 上下文不包含 `.git`。
 
 ## 修改接口快照
 
