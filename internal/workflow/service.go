@@ -79,21 +79,20 @@ type group struct {
 	saveCount                      int
 }
 type Service struct {
-	mu  sync.Mutex
-	cfg *config.Notebook
-	gen Generator
-	dst Destination
-	key string
-	g   *group
+	mu     sync.Mutex
+	cfg    *config.Notebook
+	gen    Generator
+	dst    Destination
+	groups map[string]*group
 }
 
 func New(cfg *config.Notebook, gen Generator, dst Destination) *Service {
-	return &Service{cfg: cfg, gen: gen, dst: dst}
+	return &Service{cfg: cfg, gen: gen, dst: dst, groups: make(map[string]*group)}
 }
 
-func (s *Service) view(notice string) View {
+func (s *Service) view(key, notice string) View {
 	v := View{Notice: notice}
-	if g := s.g; g != nil {
+	if g := s.groups[key]; g != nil {
 		v.Group, v.Count, v.Draft, v.Model = g.id, len(g.materials), g.draft, g.model
 		if v.Model == "" && g.profile != "" {
 			v.Model = s.cfg.Profiles[g.profile].Model
@@ -117,7 +116,7 @@ func (s *Service) view(notice string) View {
 }
 
 func (s *Service) check(key, id string) error {
-	if s.g == nil || key != s.key || (id != "" && id != s.g.id) {
+	if s.groups[key] == nil || (id != "" && id != s.groups[key].id) {
 		return errors.New("本组已结束或按钮已过期，请发送素材或使用最新按钮")
 	}
 	return nil
@@ -126,31 +125,28 @@ func (s *Service) check(key, id string) error {
 func (s *Service) Status(key string) View {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.g != nil && key != s.key {
-		return View{Notice: "会话不匹配"}
-	}
-	return s.view("")
+	return s.view(key, "")
 }
 
 func (s *Service) Add(key string, m Material) (View, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.g == nil {
+	if s.groups[key] == nil {
 		if len(m.Text) > s.cfg.MaxTextBytes {
-			return s.view(""), errors.New("素材已达配置上限，请先缩短素材")
+			return s.view(key, ""), errors.New("素材已达配置上限，请先缩短素材")
 		}
-		s.key, s.g = key, &group{id: uuid.NewString()[:12], collecting: true}
+		s.groups[key] = &group{id: uuid.NewString()[:12], collecting: true}
 	}
 	if err := s.check(key, ""); err != nil {
 		return View{}, err
 	}
-	g := s.g
+	g := s.groups[key]
 	if g.saving || g.memo.Name != "" {
-		return s.view(""), errors.New("正在保存或等待补传附件，请先完成保存后再发送新素材")
+		return s.view(key, ""), errors.New("正在保存或等待补传附件，请先完成保存后再发送新素材")
 	}
 	for _, old := range g.materials {
 		if m.ID != 0 && old.ID == m.ID {
-			return s.view(""), nil
+			return s.view(key, ""), nil
 		}
 	}
 	total := len(m.Text)
@@ -158,7 +154,7 @@ func (s *Service) Add(key string, m Material) (View, error) {
 		total += len(old.Text)
 	}
 	if len(g.materials) >= s.cfg.MaxMaterials || total > s.cfg.MaxTextBytes {
-		return s.view(""), errors.New("素材已达配置上限，请先处理本组")
+		return s.view(key, ""), errors.New("素材已达配置上限，请先处理本组")
 	}
 	m.Sources, m.Attachments = slices.Clone(m.Sources), slices.Clone(m.Attachments)
 	g.materials = append(g.materials, m)
@@ -166,7 +162,7 @@ func (s *Service) Add(key string, m Material) (View, error) {
 	if g.generating || g.draft.Version > 0 {
 		notice = "新增素材尚未纳入草稿，请重新整理"
 	}
-	return s.view(notice), nil
+	return s.view(key, notice), nil
 }
 
 func (s *Service) Collect(key, id string) (View, error) {
@@ -175,27 +171,27 @@ func (s *Service) Collect(key, id string) (View, error) {
 	if err := s.check(key, id); err != nil {
 		return View{}, err
 	}
-	if s.g.saving || s.g.memo.Name != "" {
-		return s.view(""), errors.New("请先完成保存或补传")
+	if s.groups[key].saving || s.groups[key].memo.Name != "" {
+		return s.view(key, ""), errors.New("请先完成保存或补传")
 	}
-	s.g.collecting = true
-	return s.view("已进入补充素材状态，已有草稿保留"), nil
+	s.groups[key].collecting = true
+	return s.view(key, "已进入补充素材状态，已有草稿保留"), nil
 }
 
 func (s *Service) SelectModel(key, model string) (View, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.cfg.Models[model]; !ok {
-		return s.view(""), errors.New("未知模型，请使用 /model 查看配置名称")
+		return s.view(key, ""), errors.New("未知模型，请使用 /model 查看配置名称")
 	}
 	if err := s.check(key, ""); err != nil {
 		return View{}, err
 	}
-	if s.g.generating || s.g.saving || s.g.memo.Name != "" {
-		return s.view(""), errors.New("请等待当前操作完成后再切换模型")
+	if s.groups[key].generating || s.groups[key].saving || s.groups[key].memo.Name != "" {
+		return s.view(key, ""), errors.New("请等待当前操作完成后再切换模型")
 	}
-	s.g.model = model
-	return s.view("模型已切换，下一次生成生效；已有草稿和修改要求保留"), nil
+	s.groups[key].model = model
+	return s.view(key, "模型已切换，下一次生成生效；已有草稿和修改要求保留"), nil
 }
 
 func (s *Service) Discard(key, id string) (View, error) {
@@ -204,15 +200,15 @@ func (s *Service) Discard(key, id string) (View, error) {
 	if err := s.check(key, id); err != nil {
 		return View{}, err
 	}
-	if s.g.generating || s.g.saving {
-		return s.view(""), errors.New("当前操作进行中，请完成后再放弃")
+	if s.groups[key].generating || s.groups[key].saving {
+		return s.view(key, ""), errors.New("当前操作进行中，请完成后再放弃")
 	}
 	notice := "已放弃并清空本组"
-	if s.g.memo.Name != "" {
+	if s.groups[key].memo.Name != "" {
 		notice += "；已创建的 Memos 笔记保留"
 	}
-	s.g = nil
-	return s.view(notice), nil
+	delete(s.groups, key)
+	return s.view(key, notice), nil
 }
 
 // BeginGenerate takes the snapshot before returning. The caller runs the work
@@ -223,19 +219,19 @@ func (s *Service) BeginGenerate(key, id, profile, instruction string, temporary 
 	if err := s.check(key, id); err != nil {
 		return View{}, nil, err
 	}
-	g := s.g
+	g := s.groups[key]
 	if g.generating || g.saving || g.memo.Name != "" {
-		return s.view(""), nil, errors.New("当前操作尚未完成，请稍后再试")
+		return s.view(key, ""), nil, errors.New("当前操作尚未完成，请稍后再试")
 	}
 	if s.gen == nil {
-		return s.view(""), nil, errors.New("AI 未配置；素材保留，可以原样保存")
+		return s.view(key, ""), nil, errors.New("AI 未配置；素材保留，可以原样保存")
 	}
 	if profile == "" {
 		profile = g.profile
 	}
 	p, ok := s.cfg.Profiles[profile]
 	if !ok {
-		return s.view(""), nil, errors.New("请先选择整理方案")
+		return s.view(key, ""), nil, errors.New("请先选择整理方案")
 	}
 	model := g.model
 	if model == "" {
@@ -243,7 +239,7 @@ func (s *Service) BeginGenerate(key, id, profile, instruction string, temporary 
 	}
 	m := s.cfg.Models[model]
 	if p.Images && !m.Vision {
-		return s.view(""), nil, errors.New("此模型不支持图片，请切换模型或选择关闭读图的方案")
+		return s.view(key, ""), nil, errors.New("此模型不支持图片，请切换模型或选择关闭读图的方案")
 	}
 	images := 0
 	for _, material := range g.materials {
@@ -254,23 +250,23 @@ func (s *Service) BeginGenerate(key, id, profile, instruction string, temporary 
 		}
 	}
 	if p.Images && images > s.cfg.MaxImages {
-		return s.view(""), nil, errors.New("图片数量超过 max_images，请选择关闭读图的方案或调整配置")
+		return s.view(key, ""), nil, errors.New("图片数量超过 max_images，请选择关闭读图的方案或调整配置")
 	}
 	if instruction != "" {
 		g.requirements = append(g.requirements, instruction)
 	}
 	g.profile, g.generating = profile, true
 	req := Request{Model: model, Profile: p, Materials: slices.Clone(g.materials), Draft: g.draft.Text, Requirements: slices.Clone(g.requirements), Parameters: temporary}
-	return s.view("正在生成素材快照；期间仍可发送新素材"), func(ctx context.Context) View {
+	return s.view(key, "正在生成素材快照；期间仍可发送新素材"), func(ctx context.Context) View {
 		result, err := s.gen.Generate(ctx, req)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		g.generating = false
 		if err != nil {
-			return s.view("AI 生成失败，素材、已有草稿和修改要求保留。" + err.Error())
+			return s.view(key, "AI 生成失败，素材、已有草稿和修改要求保留。"+err.Error())
 		}
 		if strings.TrimSpace(result.Text) == "" {
-			return s.view("AI 返回空内容，已有草稿保留，请重试")
+			return s.view(key, "AI 返回空内容，已有草稿保留，请重试")
 		}
 		g.draft = Draft{Version: g.draft.Version + 1, Text: result.Text, Count: len(req.Materials), Truncated: result.Truncated}
 		g.collecting = false
@@ -284,7 +280,7 @@ func (s *Service) BeginGenerate(key, id, profile, instruction string, temporary 
 		if result.InputTokens+result.OutputTokens > 0 {
 			notice += fmt.Sprintf("\n用量：输入 %d / 输出 %d Token（输出可能含思考）", result.InputTokens, result.OutputTokens)
 		}
-		return s.view(notice)
+		return s.view(key, notice)
 	}, nil
 }
 
@@ -296,12 +292,12 @@ func (s *Service) BeginSave(key, id string, version int, raw bool) (View, func(c
 	if err := s.check(key, id); err != nil {
 		return View{}, nil, err
 	}
-	g := s.g
+	g := s.groups[key]
 	if g.generating || g.saving {
-		return s.view(""), nil, errors.New("当前操作进行中，请勿重复保存")
+		return s.view(key, ""), nil, errors.New("当前操作进行中，请勿重复保存")
 	}
 	if g.memo.Name == "" && !raw && (g.draft.Version == 0 || g.draft.Version != version || g.draft.Truncated) {
-		return s.view(""), nil, errors.New("此草稿已过期或不完整，请使用最新完整草稿的确认按钮")
+		return s.view(key, ""), nil, errors.New("此草稿已过期或不完整，请使用最新完整草稿的确认按钮")
 	}
 	content, count := g.draft.Text, g.draft.Count
 	if raw {
@@ -319,7 +315,7 @@ func (s *Service) BeginSave(key, id string, version int, raw bool) (View, func(c
 		count = g.saveCount
 	}
 	g.saving = true
-	return s.view("正在保存"), func(ctx context.Context) View {
+	return s.view(key, "正在保存"), func(ctx context.Context) View {
 		memo := g.memo
 		if memo.Name == "" {
 			var err error
@@ -328,7 +324,7 @@ func (s *Service) BeginSave(key, id string, version int, raw bool) (View, func(c
 				s.mu.Lock()
 				defer s.mu.Unlock()
 				g.saving = false
-				return s.view("Memos 正文保存失败，内容保留，请重试。" + err.Error())
+				return s.view(key, "Memos 正文保存失败，内容保留，请重试。"+err.Error())
 			}
 		}
 		var failed []Attachment
@@ -341,18 +337,18 @@ func (s *Service) BeginSave(key, id string, version int, raw bool) (View, func(c
 		defer s.mu.Unlock()
 		g.memo, g.pending, g.saving = memo, failed, false
 		if len(failed) > 0 {
-			return s.view(fmt.Sprintf("正文已保存，%d 个附件尚未上传，请点击重试补传。\n%s", len(failed), memo.URL))
+			return s.view(key, fmt.Sprintf("正文已保存，%d 个附件尚未上传，请点击重试补传。\n%s", len(failed), memo.URL))
 		}
 		// New material received during generation was not part of this draft.
 		// Saving that exact version keeps those materials as the next group.
 		remaining := slices.Clone(g.materials[count:])
-		s.g = nil
+		delete(s.groups, key)
 		notice := "保存成功\n" + memo.URL
 		if len(remaining) > 0 {
-			s.g = &group{id: uuid.NewString()[:12], materials: remaining, collecting: true}
+			s.groups[key] = &group{id: uuid.NewString()[:12], materials: remaining, collecting: true}
 			notice += "\n未纳入的新增素材已保留为下一组"
 		}
-		return s.view(notice)
+		return s.view(key, notice)
 	}, nil
 }
 

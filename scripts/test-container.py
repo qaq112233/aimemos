@@ -118,7 +118,7 @@ def main():
                    "--add-host", "host.docker.internal:host-gateway",
                    "--mount", "type=volume,source=" + volume + ",target=/data",
                    "-e", "SERVER_ADDR=" + base_url, "-e", "BOT_PROXY_ADDR=" + base_url,
-                   "-e", "BOT_TOKEN=123:test-token", image)
+                   "-e", "BOT_TOKEN=123:test-token", "-e", "ALLOWED_USER_IDS=42", image)
             expected = "Hello Test!" if index == 0 else "Content saved"
             with MockAPI.condition:
                 ok = MockAPI.condition.wait_for(lambda: any(expected in reply for reply in MockAPI.replies), timeout=30)

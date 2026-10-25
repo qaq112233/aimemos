@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -32,7 +31,7 @@ type Notebook struct {
 	SystemPrompt  string              `yaml:"system_prompt"`
 	TagPrompt     string              `yaml:"tag_prompt"`
 	CommonTags    []string            `yaml:"common_tags"`
-	UserID        int64               `yaml:"-"`
+	Access        Access              `yaml:"-"`
 	MemosToken    string              `yaml:"-"`
 	ProxyURL      string              `yaml:"-"` // Shared PROXY_URL, supplied by startup configuration.
 }
@@ -144,15 +143,19 @@ func ReadNotebook(path string) (*Notebook, error) {
 }
 
 func LoadNotebook(path string) (*Notebook, error) {
+	return loadNotebook(path, os.Getenv)
+}
+
+func loadNotebook(path string, getenv func(string) string) (*Notebook, error) {
 	c, err := ReadNotebook(path)
 	if err != nil {
 		return nil, err
 	}
-	c.UserID, err = strconv.ParseInt(os.Getenv(c.UserIDEnv), 10, 64)
-	if err != nil || c.UserID <= 0 {
-		return nil, fmt.Errorf("set %s to your numeric Telegram user ID", c.UserIDEnv)
+	c.Access, err = readAccess(getenv, c.UserIDEnv)
+	if err != nil {
+		return nil, err
 	}
-	c.MemosToken = strings.TrimSpace(os.Getenv(c.MemosTokenEnv))
+	c.MemosToken = strings.TrimSpace(getenv(c.MemosTokenEnv))
 	if c.MemosToken == "" {
 		return nil, fmt.Errorf("%s is required", c.MemosTokenEnv)
 	}
@@ -160,8 +163,8 @@ func LoadNotebook(path string) (*Notebook, error) {
 }
 
 func (c *Notebook) Validate() error {
-	if c.UserIDEnv == "" || c.MemosTokenEnv == "" {
-		return errors.New("user_id_env and memos_token_env are required")
+	if c.MemosTokenEnv == "" {
+		return errors.New("memos_token_env is required")
 	}
 	if c.StatusEvery <= 0 || c.MaxMaterials <= 0 || c.MaxTextBytes <= 0 || c.MaxImages <= 0 {
 		return errors.New("status_every and material limits must be positive")

@@ -21,11 +21,11 @@ func TestFromEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := &Config{
-		ServerAddr:       "http://localhost:5230",
-		BotToken:         "123:token",
-		BotProxyAddr:     "http://telegram-proxy:8081",
-		DataPath:         DefaultDataPath,
-		AllowedUsernames: []string{"alice", "bob"},
+		ServerAddr:   "http://localhost:5230",
+		BotToken:     "123:token",
+		BotProxyAddr: "http://telegram-proxy:8081",
+		DataPath:     DefaultDataPath,
+		Access:       Access{Usernames: []string{"alice", "bob"}},
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("got %+v, want %+v", cfg, want)
@@ -37,9 +37,9 @@ func TestFromEnvRejectsInvalidSettings(t *testing.T) {
 		name, want string
 		values     map[string]string
 	}{
-		{"missing server", "SERVER_ADDR is required", map[string]string{"BOT_TOKEN": "t"}},
-		{"blank server", "SERVER_ADDR is required", map[string]string{"SERVER_ADDR": " ", "BOT_TOKEN": "t"}},
-		{"invalid server", "SERVER_ADDR must be an HTTP", map[string]string{"SERVER_ADDR": "ftp://memos", "BOT_TOKEN": "t"}},
+		{"missing server", "SERVER_ADDR is required", map[string]string{"BOT_TOKEN": "t", "ALLOWED_USER_IDS": "42"}},
+		{"blank server", "SERVER_ADDR is required", map[string]string{"SERVER_ADDR": " ", "BOT_TOKEN": "t", "ALLOWED_USER_IDS": "42"}},
+		{"invalid server", "SERVER_ADDR must be an HTTP", map[string]string{"SERVER_ADDR": "ftp://memos", "BOT_TOKEN": "t", "ALLOWED_USER_IDS": "42"}},
 		{"missing token", "BOT_TOKEN is required", map[string]string{"SERVER_ADDR": "localhost:5230"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -51,8 +51,8 @@ func TestFromEnvRejectsInvalidSettings(t *testing.T) {
 }
 
 func TestFromEnvKeepsDataPath(t *testing.T) {
-	cfg, err := FromEnv(env(map[string]string{"SERVER_ADDR": "localhost", "BOT_TOKEN": "t", "DATA": "/data/data.txt"}))
-	if err != nil || cfg.DataPath != "/data/data.txt" || cfg.AllowedUsernames != nil {
+	cfg, err := FromEnv(env(map[string]string{"SERVER_ADDR": "localhost", "BOT_TOKEN": "t", "ALLOWED_USER_IDS": "42", "DATA": "/data/data.txt"}))
+	if err != nil || cfg.DataPath != "/data/data.txt" || cfg.Access.Usernames != nil {
 		t.Fatalf("got %+v, %v", cfg, err)
 	}
 }
@@ -64,13 +64,13 @@ func TestProxyEnvironmentPrecedenceAndValidation(t *testing.T) {
 		{"http://shared.test:8080", "socks5://telegram.test:1080", "socks5://telegram.test:1080"},
 		{"socks5://shared.test:1080", "direct", "direct"},
 	} {
-		cfg, err := FromEnv(env(map[string]string{"SERVER_ADDR": "localhost", "BOT_TOKEN": "t", "PROXY_URL": tc.shared, "TELEGRAM_PROXY_URL": tc.telegram}))
+		cfg, err := FromEnv(env(map[string]string{"SERVER_ADDR": "localhost", "BOT_TOKEN": "t", "ALLOWED_USER_IDS": "42", "PROXY_URL": tc.shared, "TELEGRAM_PROXY_URL": tc.telegram}))
 		if err != nil || cfg.TelegramProxyURL != tc.want || cfg.ProxyURL != tc.shared {
 			t.Fatalf("proxy precedence: cfg=%+v err=%v", cfg, err)
 		}
 	}
 	for _, field := range []string{"PROXY_URL", "TELEGRAM_PROXY_URL"} {
-		_, err := FromEnv(env(map[string]string{"SERVER_ADDR": "localhost", "BOT_TOKEN": "t", field: "ftp://user:SECRET@proxy.test"}))
+		_, err := FromEnv(env(map[string]string{"SERVER_ADDR": "localhost", "BOT_TOKEN": "t", "ALLOWED_USER_IDS": "42", field: "ftp://user:SECRET@proxy.test"}))
 		if err == nil || !strings.Contains(err.Error(), field) || strings.Contains(err.Error(), "SECRET") {
 			t.Fatalf("invalid %s accepted or leaked: %v", field, err)
 		}

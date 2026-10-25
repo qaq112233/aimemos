@@ -12,7 +12,7 @@ func TestValidate(t *testing.T) {
 		version string
 		valid   bool
 	}{
-		{"0.1.0", true}, {"0.1.0-rc.1", true}, {"26.13.0", true}, {"26.1.0", true},
+		{"0.1.0", true}, {"0.1.0-rc.1", true}, {"0.2.0", true}, {"26.13.0", true}, {"26.1.0", true},
 		{"26.10.0", true}, {"26.10.1", true}, {"26.01.0", true}, {"27.12.12-rc.3", true},
 		{"26.10.15-dev.abcdef0", true}, {"26.01.1-dev.abcdef0", true},
 		{"", false}, {"v26.10.0", false}, {"v0.5.0", false}, {"26.10", false},

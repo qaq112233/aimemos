@@ -8,13 +8,15 @@ import (
 )
 
 func TestNotebookExampleAndSecretReferences(t *testing.T) {
+	t.Setenv("ALLOWED_USERNAMES", "")
+	t.Setenv("ALLOWED_USER_IDS", "")
 	t.Setenv("TELEGRAM_USER_ID", "42")
 	t.Setenv("MEMOS_TOKEN", "private-unit-token")
 	cfg, err := LoadNotebook("../../notebook.example.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.UserID != 42 || cfg.MemosToken != "private-unit-token" || len(cfg.Providers) != 2 {
+	if !cfg.Access.Allows(42, "") || cfg.MemosToken != "private-unit-token" || len(cfg.Providers) != 2 {
 		t.Fatal("example configuration did not resolve references")
 	}
 	t.Setenv("TELEGRAM_USER_ID", "")

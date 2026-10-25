@@ -46,20 +46,30 @@ def main():
         previous = run("bash", "scripts/release_version.sh", "previous-tag", ".", cwd=repo)
         goos = platform.system().lower()
         goarch = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "amd64", "amd64": "amd64"}[platform.machine().lower()]
-        for tag in ["v0.1.0", "v0.1.0-rc.1", "26.01.0"]:
+        for tag in ["v0.2.0", "v0.2.0-rc.1", "26.01.0"]:
             run("git", "tag", "--force", tag, cwd=repo)
             run("bash", "scripts/release_version.sh", "version", tag, cwd=repo)
             env = os.environ.copy()
             for key in ["GITHUB_TOKEN", "GH_TOKEN", "GITLAB_TOKEN", "GITEA_TOKEN"]:
                 env.pop(key, None)
+            # Cross-compilers for several operating systems can exhaust WSL
+            # memory and cause swapping. Keep local dry runs sequential.
+            env.setdefault("GOMAXPROCS", "2")
+            env.setdefault("GOFLAGS", "-p=2")
             env.update(GORELEASER_CURRENT_TAG=tag, GORELEASER_PREVIOUS_TAG=previous)
-            run(executable, "release", "--clean", "--skip=publish,announce", cwd=repo, env=env)
+            run(executable, "release", "--clean", "--parallelism=1", "--skip=publish,announce", cwd=repo, env=env)
             archives = list((repo / "dist").glob("memogram_" + tag + "_*.tar.gz"))
             if not archives:
                 raise RuntimeError("missing archives for " + tag)
             native = repo / "dist" / ("memogram_" + tag + "_" + goos + "_" + goarch + ".tar.gz")
             binary = Path(temp) / "memogram"
             with tarfile.open(native) as archive:
+                names = {item.name for item in archive.getmembers()}
+                expected = {"README.md", "README_NOTEBOOK.md", "CHANGELOG.md", "notebook.example.yaml", ".env.example", ".env.notebook.example"}
+                if not expected <= names:
+                    raise RuntimeError("missing release setup files: " + str(expected - names))
+                if any(Path(name).name in {".env", "notebook.yaml", "data.txt"} for name in names):
+                    raise RuntimeError("private configuration or bindings included in release")
                 member = next(item for item in archive.getmembers() if Path(item.name).name == "memogram")
                 binary.write_bytes(archive.extractfile(member).read())
             binary.chmod(0o700)

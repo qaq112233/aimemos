@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"mime"
 	"net/url"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -22,13 +24,12 @@ import (
 )
 
 func (s *Service) notebookAccess(u *models.Update) bool {
-	id := s.notebookCfg.UserID
 	if m := u.Message; m != nil {
-		return m.From != nil && m.From.ID == id && m.Chat.ID == id && m.Chat.Type == models.ChatTypePrivate
+		return m.From != nil && m.Chat.ID == m.From.ID && m.Chat.Type == models.ChatTypePrivate && s.access.Allows(m.From.ID, m.From.Username)
 	}
 	if q := u.CallbackQuery; q != nil {
 		m := q.Message.Message
-		return q.From.ID == id && m != nil && m.Chat.ID == id && m.Chat.Type == models.ChatTypePrivate
+		return m != nil && m.Chat.ID == q.From.ID && m.Chat.Type == models.ChatTypePrivate && s.access.Allows(q.From.ID, q.From.Username)
 	}
 	return false
 }
@@ -92,8 +93,8 @@ func (s *Service) handleNotebookMessage(ctx context.Context, u *models.Update) {
 	}
 	// This interval throttles status only. It never triggers generation/save
 	// or splits an album/group. /status always shows the exact count.
-	if v.Count == 1 || v.Generating || v.Draft.Version > 0 || time.Since(s.statusAt) >= s.notebookCfg.StatusEvery {
-		s.statusAt = time.Now()
+	if v.Count == 1 || v.Generating || v.Draft.Version > 0 || time.Since(s.statusAt[m.Chat.ID]) >= s.notebookCfg.StatusEvery {
+		s.statusAt[m.Chat.ID] = time.Now()
 		s.showNotebook(ctx, m.Chat.ID, v, false)
 	}
 }
@@ -317,10 +318,24 @@ func notebookMaterial(m *models.Message) (workflow.Material, bool) {
 	}
 	material := workflow.Material{ID: m.ID, Text: text, Sources: sources}
 	if file, ok := messageFile(m); ok {
-		image := len(m.Photo) > 0 || strings.HasPrefix(file.mimeType, "image/")
+		image := len(m.Photo) > 0 || notebookImage(file)
 		material.Attachments = []workflow.Attachment{{ID: file.id, Name: file.name, MIME: file.mimeType, Image: image}}
 	}
 	return material, text != "" || len(material.Attachments) > 0
+}
+
+// Some Telegram clients send image documents without a MIME type. Use their
+// filename only to select downloads; the AI client checks the actual bytes.
+func notebookImage(file telegramFile) bool {
+	mediaType, _, _ := mime.ParseMediaType(file.mimeType)
+	if strings.HasPrefix(strings.ToLower(mediaType), "image/") {
+		return true
+	}
+	switch strings.ToLower(path.Ext(file.name)) {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".bmp", ".tif", ".tiff":
+		return true
+	}
+	return false
 }
 
 func (s *Service) fetchNotebookFile(ctx context.Context, a workflow.Attachment) (workflow.File, error) {

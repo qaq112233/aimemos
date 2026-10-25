@@ -34,7 +34,7 @@ type UserStore interface {
 
 // Options configures a Service.
 type Options struct {
-	// Notebook enables the single-user, explicit-save workflow instead of
+	// Notebook enables the explicit-save workflow with private user sessions instead of
 	// upstream's immediate capture. NewGenerator receives token-safe file bytes.
 	Notebook     *config.Notebook
 	NewGenerator func(workflow.Fetch) workflow.Generator
@@ -49,9 +49,8 @@ type Options struct {
 	Memos *memos.Client
 	// Store holds the users' access tokens and settings.
 	Store UserStore
-	// AllowedUsernames lists the lowercase Telegram usernames allowed to use
-	// the bot. Empty allows everyone.
-	AllowedUsernames []string
+	// Access requires explicit usernames, IDs, or an explicit AllowAll.
+	Access config.Access
 	// Downloads fetches files from Telegram. It defaults to a client with a
 	// 60 second timeout.
 	Downloads *http.Client
@@ -62,12 +61,12 @@ type Options struct {
 type Service struct {
 	notebook    *workflow.Service
 	notebookCfg *config.Notebook
-	statusAt    time.Time
+	statusAt    map[int64]time.Time
 	bot         *bot.Bot
 	memos       *memos.Client
 	store       UserStore
 	downloads   *http.Client
-	allowed     map[string]struct{}
+	access      config.Access
 	albums      *mediaGroups
 
 	// spaces reports whether the Memos server supports spaces. It is set from
@@ -93,6 +92,9 @@ func New(opts Options) (*Service, error) {
 	if opts.Memos == nil || opts.Store == nil {
 		return nil, errors.New("a Memos client and a token store are required")
 	}
+	if err := opts.Access.Validate(); err != nil {
+		return nil, err
+	}
 	transport, err := netproxy.Transport(opts.ProxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("telegram proxy: %w", err)
@@ -101,7 +103,8 @@ func New(opts Options) (*Service, error) {
 		memos:     opts.Memos,
 		store:     opts.Store,
 		downloads: opts.Downloads,
-		allowed:   make(map[string]struct{}, len(opts.AllowedUsernames)),
+		access:    opts.Access,
+		statusAt:  make(map[int64]time.Time),
 		albums:    newMediaGroups(albumTTL),
 		linkBase:  opts.Memos.BaseURL(),
 	}
@@ -109,9 +112,6 @@ func New(opts Options) (*Service, error) {
 		s.downloads = &http.Client{Timeout: 60 * time.Second, Transport: transport}
 	}
 	s.spaces.Store(true)
-	for _, username := range opts.AllowedUsernames {
-		s.allowed[strings.ToLower(username)] = struct{}{}
-	}
 
 	botOptions := []bot.Option{
 		bot.WithHTTPClient(time.Minute, &http.Client{Timeout: time.Minute, Transport: transport}),

@@ -1,5 +1,5 @@
-# Copy to notebook.yaml. Model IDs here are examples; use IDs offered by your service.
-user_id_env: TELEGRAM_USER_ID
+# 复制为 notebook.yaml，填写供应商提供的真实模型 ID。
+# 访问名单在 .env 配置 ALLOWED_USERNAMES / ALLOWED_USER_IDS。
 memos_token_env: MEMOS_TOKEN
 status_every: 4s
 max_materials: 100
@@ -12,14 +12,14 @@ providers:
     key_env: CLIPROXY_API_KEY
     timeout: 180s
     headers: {}
-    # Optional provider override; omitted/empty inherits .env PROXY_URL.
-    # Use direct for a local service when other traffic needs a proxy.
+    # 可选的供应商专用代理；省略或留空时继承 .env 的 PROXY_URL。
+    # 本地服务可设为 direct，使其直接连接。
     # proxy_url: direct
   compatible:
     base_url: https://api.deepseek.com/v1
     key_env: COMPATIBLE_API_KEY
     timeout: 180s
-    # Set only one of proxy_url and proxy_env. Keep authenticated URLs in .env.
+    # proxy_url 和 proxy_env 二选一；含认证信息的代理地址放在 .env。
     # proxy_url: http://host.docker.internal:7890
     # proxy_env: COMPATIBLE_PROXY_URL
 
@@ -44,8 +44,8 @@ models:
       max_tokens: 8192
       # temperature: 0.5
       # top_p: 0.9
-      # For services that support a native thinking budget:
-      # reasoning_budget_field (at model level): thinking.budget_tokens
+      # 仅在供应商支持原生思考预算时配置：
+      # 模型层配置 reasoning_budget_field: thinking.budget_tokens
       # reasoning_budget: 2048
 
 profiles:
@@ -72,12 +72,23 @@ profiles:
     images: true
     tags: true
     prompt: 根据用户本次要求整理资料，同时遵守来源、标签和保存规则。
+  vision:
+    name: 图片理解
+    model: primary
+    images: true
+    tags: true
+    prompt: |
+      结合图片、图片说明和其他文字素材整理笔记，提取图片中的重要文字、数据和可见细节。
+      多张图片按素材及附件顺序关联，区分图片中直接可见的事实与推断。
+      看不清或无法确认的内容标记“待确认”，不编造被遮挡的文字、数值或画面外的信息。
+      重要信息自然写入正文或简短图注，便于以后文字检索。
 
 entries:
   "1": {label: 原样保存, action: raw}
   "2": {label: 简单整理, action: generate, profile: tidy}
   "3": {label: 教程整理, action: generate, profile: tutorial}
   "4": {label: 自定义整理, action: generate, profile: custom, custom: true}
+  "5": {label: 图片理解, action: generate, profile: vision}
 
 system_prompt: |
   你是个人笔记编辑器。只输出可直接保存的标准 Markdown 正文，不用外层代码围栏。

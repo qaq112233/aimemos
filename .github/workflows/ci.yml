@@ -26,6 +26,7 @@ jobs:
       - run: go vet ./...
       - run: sh scripts/build.sh
       - run: ./build/memogram --version
+      - run: python3 scripts/test-notebook.py
       - run: go generate ./...
       - run: git diff --exit-code -- openapi internal/memosapi
 

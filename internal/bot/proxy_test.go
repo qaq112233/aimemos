@@ -11,6 +11,7 @@ import (
 
 	telegram "github.com/go-telegram/bot"
 
+	"github.com/usememos/memogram/internal/config"
 	"github.com/usememos/memogram/internal/memos"
 	"github.com/usememos/memogram/internal/testproxy"
 )
@@ -42,7 +43,7 @@ func TestTelegramProxyCoversAPIAndFileDownloads(t *testing.T) {
 			if protocol == "socks5" {
 				proxyURL = testproxy.NewSOCKS5(t, strings.TrimPrefix(server.URL, "http://"), false).URL
 			}
-			s, err := New(Options{Token: "123:test-token", ServerURL: "http://telegram.invalid", ProxyURL: proxyURL, Memos: memos.NewClient("http://127.0.0.1:1"), Store: openStore(t), BotOptions: []telegram.Option{telegram.WithNotAsyncHandlers()}})
+			s, err := New(Options{Token: "123:test-token", Access: config.Access{UserIDs: []int64{42}}, ServerURL: "http://telegram.invalid", ProxyURL: proxyURL, Memos: memos.NewClient("http://127.0.0.1:1"), Store: openStore(t), BotOptions: []telegram.Option{telegram.WithNotAsyncHandlers()}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,8 +66,8 @@ func TestTelegramProxyCoversAPIAndFileDownloads(t *testing.T) {
 }
 
 func TestTelegramRejectsInvalidProxyBeforeConnecting(t *testing.T) {
-	_, err := New(Options{Token: "token", ProxyURL: "ftp://user:SECRET@proxy.test", Memos: memos.NewClient("http://127.0.0.1:1"), Store: openStore(t)})
-	if err == nil || strings.Contains(err.Error(), "SECRET") {
+	_, err := New(Options{Token: "token", Access: config.Access{UserIDs: []int64{42}}, ProxyURL: "ftp://user:SECRET@proxy.test", Memos: memos.NewClient("http://127.0.0.1:1"), Store: openStore(t)})
+	if err == nil || !strings.Contains(err.Error(), "proxy") || strings.Contains(err.Error(), "SECRET") {
 		t.Fatalf("invalid Telegram proxy accepted or leaked: %v", err)
 	}
 }

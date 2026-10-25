@@ -98,6 +98,17 @@ func TestProtocolsParametersImagesAndUsage(t *testing.T) {
 				if vision != (fetches == 1) || vision != strings.Contains(body, "data:image/png;base64,") {
 					t.Fatalf("vision=%t fetches=%d body=%s", vision, fetches, body)
 				}
+				system, _ := received["instructions"].(string)
+				if protocol == "chat_completions" {
+					system = received["messages"].([]any)[0].(map[string]any)["content"].(string)
+				}
+				if vision {
+					if !strings.Contains(system, "本次提供 1 张图片") || !strings.Contains(body, "materials[0].Attachments[0]") {
+						t.Fatal("missing image count or attachment association")
+					}
+				} else if !strings.Contains(system, "本次没有提供图片像素") {
+					t.Fatal("text-only request did not tell the model that pixels are absent")
+				}
 			})
 		}
 	}

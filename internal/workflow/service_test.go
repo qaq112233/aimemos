@@ -166,8 +166,56 @@ func TestSavingOlderSnapshotRetainsNewMaterial(t *testing.T) {
 	v = work(context.Background())
 	id := v.Group
 	v = save(t, s, id, v.Draft.Version, false)
-	if v.Count != 1 || !v.Collecting || v.Group == id || s.g.materials[0].Text != "new" {
+	if v.Count != 1 || !v.Collecting || v.Group == id || s.groups[session].materials[0].Text != "new" {
 		t.Fatalf("lost unprocessed material: %+v", v)
+	}
+}
+
+func TestConcurrentUsersKeepIndependentGroups(t *testing.T) {
+	dst := &destination{}
+	s := New(settings(), generatorFunc(func(_ context.Context, r Request) (Result, error) {
+		if len(r.Materials) != 1 {
+			t.Errorf("mixed source snapshots: %+v", r.Materials)
+		}
+		return Result{Text: r.Materials[0].Text}, nil
+	}), dst)
+	keys := []string{"telegram:private:42", "telegram:private:43"}
+	var workers sync.WaitGroup
+	for _, key := range keys {
+		workers.Go(func() {
+			v, err := s.Add(key, Material{ID: 1, Text: key})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_, work, err := s.BeginGenerate(key, v.Group, "tidy", "", config.Parameters{})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if got := work(context.Background()); got.Draft.Text != key || got.Count != 1 {
+				t.Errorf("wrong user draft: %+v", got)
+			}
+		})
+	}
+	workers.Wait()
+	a, b := s.Status(keys[0]), s.Status(keys[1])
+	if a.Group == b.Group || a.Draft.Text != keys[0] || b.Draft.Text != keys[1] {
+		t.Fatalf("user sessions mixed: %+v %+v", a, b)
+	}
+	if _, _, err := s.BeginSave(keys[1], a.Group, 1, false); err == nil {
+		t.Fatal("another user's confirmation accepted")
+	}
+	_, work, err := s.BeginSave(keys[0], a.Group, 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work(context.Background())
+	if s.Status(keys[0]).Count != 0 || s.Status(keys[1]).Draft.Text != keys[1] || dst.creates != 1 || dst.contents[0] != keys[0] {
+		t.Fatal("saving a user affected the other session")
+	}
+	if _, err := s.Discard(keys[1], b.Group); err != nil || len(s.groups) != 0 {
+		t.Fatalf("finished groups retained: %v", err)
 	}
 }
 

@@ -38,7 +38,7 @@ func notebookSettings(t *testing.T) *config.Notebook {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	cfg.UserID, cfg.MemosToken = 42, "unit-memos-token"
+	cfg.Access, cfg.MemosToken = config.Access{UserIDs: []int64{42}}, "unit-memos-token"
 	return &cfg
 }
 func notebookMessage(id int, text string) *models.Update {
@@ -194,5 +194,67 @@ func TestNotebookPreservesCompleteSourceURLs(t *testing.T) {
 	material, _ := notebookMaterial(m)
 	if len(material.Sources) != 1 || material.Sources[0] != "https://t.me/author" {
 		t.Fatalf("corrupted forwarded sender link: %+v", material.Sources)
+	}
+}
+
+func TestNotebookAllowedUsersHaveSeparatePrivateDrafts(t *testing.T) {
+	for _, access := range []config.Access{{Usernames: []string{"alice", "bob"}}, {UserIDs: []int64{42, 43}}, {AllowAll: true}} {
+		cfg := notebookSettings(t)
+		cfg.Access = access
+		tg := newFakeTelegram(t, nil)
+		s := newTestService(t, tg, Options{Notebook: cfg, NewGenerator: func(workflow.Fetch) workflow.Generator {
+			return notebookGenerator(func(_ context.Context, r workflow.Request) (workflow.Result, error) {
+				if len(r.Materials) != 1 {
+					t.Errorf("users' sources mixed: %+v", r.Materials)
+				}
+				return workflow.Result{Text: "整理：" + r.Materials[0].Text}, nil
+			})
+		}})
+		message := func(id int64, name, text string) *models.Update {
+			m := textMessage(id, text)
+			m.From.Username = name
+			if text == "2" {
+				m.ID = 2
+			}
+			return &models.Update{Message: m}
+		}
+		s.process(message(42, "Alice", "Alice的私有素材"))
+		s.process(message(43, "bob", "Bob的私有素材"))
+		a, b := s.notebook.Status(notebookKey(42)), s.notebook.Status(notebookKey(43))
+		if a.Count != 1 || b.Count != 1 || a.Group == b.Group || s.notebook.Status(notebookKey(99)).Count != 0 {
+			t.Fatalf("private collections not isolated: %+v %+v", a, b)
+		}
+		s.process(message(42, "Alice", "2"))
+		s.process(message(43, "bob", "2"))
+		awaitNotebook(t, tg, "整理：Alice的私有素材")
+		awaitNotebook(t, tg, "整理：Bob的私有素材")
+		button := notebookButton(43, "nb:save:"+a.Group+":1")
+		button.CallbackQuery.From.Username = "bob"
+		button.CallbackQuery.Message.Message.Chat.ID = 43
+		s.process(button)
+		if s.notebook.Status(notebookKey(42)).Count != 1 || s.notebook.Status(notebookKey(43)).Count != 1 {
+			t.Fatal("foreign draft button saved or cleared a collection")
+		}
+		button = notebookButton(42, "nb:discard:"+a.Group+":-")
+		button.CallbackQuery.From.Username = "Alice"
+		s.process(button)
+		if s.notebook.Status(notebookKey(42)).Count != 0 || s.notebook.Status(notebookKey(43)).Draft.Text != "整理：Bob的私有素材" {
+			t.Fatal("discard affected another private session")
+		}
+		for _, call := range tg.snapshot() {
+			if (call.chatID == 42 && strings.Contains(call.text, "Bob的私有素材")) || (call.chatID == 43 && strings.Contains(call.text, "Alice的私有素材")) {
+				t.Fatal("draft sent to another user's chat")
+			}
+		}
+		// Even explicit unrestricted access only admits each user's own private chat.
+		before := len(tg.snapshot())
+		foreignChat := message(42, "Alice", "must be ignored")
+		foreignChat.Message.Chat.ID = 43
+		s.process(foreignChat)
+		button = notebookButton(99, "nb:discard:"+b.Group+":-")
+		s.process(button)
+		if len(tg.snapshot()) != before {
+			t.Fatal("accepted a notebook update from a different private chat")
+		}
 	}
 }

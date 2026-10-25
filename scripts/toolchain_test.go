@@ -23,8 +23,8 @@ func TestGoVersionMatchesModule(t *testing.T) {
 	}
 	want := find("../go.mod", `(?m)^go (\S+)$`)
 	for path, pattern := range map[string]string{
-		"../Dockerfile": `(?m)^FROM golang:(\S+)-alpine `,
-		"../README.md":  `Requires Go (\S+) or newer\.`,
+		"../Dockerfile":          `(?m)^FROM golang:(\S+)-alpine `,
+		"../docs/DEVELOPMENT.md": `需要 Go (\S+) 或更高版本。`,
 	} {
 		if got := find(path, pattern); got != want {
 			t.Errorf("%s uses Go %s, but go.mod requires %s", path, got, want)

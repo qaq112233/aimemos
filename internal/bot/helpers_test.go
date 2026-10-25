@@ -16,6 +16,7 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
+	"github.com/usememos/memogram/internal/config"
 	"github.com/usememos/memogram/internal/memos"
 	"github.com/usememos/memogram/internal/store"
 )
@@ -137,6 +138,13 @@ func newTestService(t *testing.T, telegram http.Handler, opts Options) *Service 
 	t.Helper()
 	server := httptest.NewServer(telegram)
 	t.Cleanup(server.Close)
+	if opts.Access.Validate() != nil {
+		if opts.Notebook != nil {
+			opts.Access = opts.Notebook.Access
+		} else {
+			opts.Access = config.Access{AllowAll: true}
+		}
+	}
 	opts.Token = "123:test-token"
 	opts.ServerURL = server.URL
 	opts.BotOptions = append(opts.BotOptions, bot.WithSkipGetMe(), bot.WithNotAsyncHandlers())

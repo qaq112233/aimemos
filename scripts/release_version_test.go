@@ -25,7 +25,7 @@ func releaseCommand(args ...string) *exec.Cmd {
 
 func TestReleaseTags(t *testing.T) {
 	requireTools(t)
-	for _, tag := range []string{"v0.1.0", "v0.1.0-rc.1", "v1.2.3", "26.10.0", "26.10.1", "26.01.0", "27.12.0", "26.10.0-rc.1", "26.10.2-rc.12"} {
+	for _, tag := range []string{"v0.1.0", "v0.1.0-rc.1", "v0.2.0", "v1.2.3", "26.10.0", "26.10.1", "26.01.0", "27.12.0", "26.10.0-rc.1", "26.10.2-rc.12"} {
 		t.Run(tag, func(t *testing.T) {
 			output, err := releaseCommand("version", tag).CombinedOutput()
 			if err != nil {

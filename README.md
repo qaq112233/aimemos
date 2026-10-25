@@ -1,211 +1,159 @@
-# Memogram
+# AIMemos / Memogram
 
-This local fork also includes a single-user AI notebook with explicit save confirmation. See [笔记模式 MVP](README_NOTEBOOK.md) for its configuration, operation and verification limits. The upstream immediate-save mode documented below is retained when `NOTEBOOK_CONFIG` is unset.
+通过 Telegram 收集文字、网址、图片和文件，交给 AI 整理成 Markdown 草稿，确认后保存到 Memos。当前版本 **v0.2.0**，支持多图理解、草稿修改、多供应商和两种 AI 协议。
 
-**Memogram** is an easy to use integration service for syncing messages and images from a Telegram bot into your Memos.
+项目基于 [usememos/telegram-integration](https://github.com/usememos/telegram-integration)，保留上游历史与即时保存模式；程序和发布文件仍使用 `memogram` 名称。
 
-## Prerequisites
+## 两种使用方式
 
-- Memos service: latest (`main`/`canary`) or one of the two most recent stable series, currently **0.30.x and 0.31.x**
-- Telegram Bot
+| 模式 | 配置 | 保存行为 | Memos 账号 |
+| --- | --- | --- | --- |
+| AI 笔记模式 | 设置 `NOTEBOOK_CONFIG=notebook.yaml` | 收集 → 生成草稿 → 修改 → 确认保存 | 使用环境中的 `MEMOS_TOKEN`，获准用户共用此账号 |
+| 即时保存模式 | `NOTEBOOK_CONFIG` 留空 | 收到文字或附件后直接保存 | 每个用户通过 `/start <令牌>` 绑定自己的账号 |
 
-Older Memos versions are outside the supported range. CI checks the latest image and the two stable releases with real Memos containers.
+AI 笔记模式只接受私聊，素材、草稿、模型选择和确认按钮按 Telegram 用户隔离。内存中的未保存内容会随进程重启丢失。网址只保留链接和附带文字，不抓取网页正文。
 
-## Installation
+- [AI 笔记模式与图片理解](README_NOTEBOOK.md)
+- [更新日志与升级事项](CHANGELOG.md)
+- [开发、测试与发布](docs/DEVELOPMENT.md)
+- [功能约定](docs/REQUIREMENTS.md)
 
-Download the binary files for your operating system from the [Releases](https://github.com/usememos/telegram-integration/releases) page.
+## 先配置允许用户
 
-## Configuration
+**两种模式都必须配置允许用户，否则程序拒绝启动。** 从下面选择一种，在 `.env` 填写：
 
-Create a `.env` file in the project's root directory and add the following configuration:
-
-```env
-SERVER_ADDR=http://localhost:5230
-BOT_TOKEN=your_telegram_bot_token
-BOT_PROXY_ADDR=https://api.your_proxy_addr.com
-ALLOWED_USERNAMES=user1,user2,user3
-DATA=data.txt
+```dotenv
+# 按 Telegram 用户名允许，可带 @，不区分大小写。
+ALLOWED_USERNAMES=alice,bob
 ```
 
-### Configuration Options
+```dotenv
+# 按 Telegram 数字用户 ID 允许，账号不需要设置用户名。
+ALLOWED_USER_IDS=123456789,987654321
+```
 
-- `SERVER_ADDR`: The full HTTP or HTTPS base URL of your Memos instance, such as `https://memos.example.com`. Legacy `dns:localhost:5230` and bare host addresses are still accepted and normalized to HTTP.
-- `BOT_TOKEN`: Your Telegram bot token
-- `BOT_PROXY_ADDR`: Optional alternative Telegram API server URL (leave empty if not needed). This is not an HTTP CONNECT proxy.
-- `PROXY_URL`: Optional shared network proxy for Telegram and AI providers. Accepts `http://`, `https://`, `socks5://`, `socks5h://`, or `direct`. This setting applies to Telegram and AI traffic; Memos keeps its existing connection settings.
-- `TELEGRAM_PROXY_URL`: Optional Telegram override, including Bot API calls and attachment downloads. Empty inherits `PROXY_URL`; `direct` bypasses proxies. AI provider overrides are configured in `notebook.yaml`; see [network proxy configuration](README_NOTEBOOK.md#网络代理).
-- `ALLOWED_USERNAMES`: Optional comma-separated list of allowed usernames (without @ symbol)
-- `DATA`: Token binding file, defaulting to `data.txt` for binaries and `/data/data.txt` inside the container. Its parent directory must be writable. Persist this file across upgrades and keep it private: it contains Memos access tokens. It holds one JSON object per user. Files written by versions before Spaces support are read as before and converted on the next change, so downgrading after that point requires every user to send `/start` again.
+原有 `TELEGRAM_USER_ID=123456789` 继续有效，并与 ID 名单合并。用户名与 ID 同时配置时，任意一项匹配即可使用。数字 ID 指发送人的用户 ID，不是群聊 ID、手机号或 Bot Token。
 
-### Username Restrictions
+如果确实需要允许所有人，必须**手动**将其中一个字段单独填写为小写 `none`，另外两个字段留空：
 
-The `ALLOWED_USERNAMES` environment variable allows you to restrict bot usage to specific Telegram users. When set, only users with usernames in this list will be able to interact with the bot.
+```dotenv
+ALLOWED_USERNAMES=none
+ALLOWED_USER_IDS=
+TELEGRAM_USER_ID=
+```
 
-#### Examples
+所有示例默认留空，不会默认设置 `none`。全部留空、无效 ID、仅有逗号，或把 `none` 与其他名单混填，都会拒绝启动。检查同时作用于消息和按钮。AI 笔记模式即使开放所有人，也只接受各用户自己的私聊；所有获准用户的笔记仍保存到配置的同一个 Memos 账号。
 
-1. Allow specific users:
+## 准备服务
 
-   ```env
-   ALLOWED_USERNAMES=alex,john,emily
-   ```
+需要已经运行的 Memos、Telegram Bot，以及 AI 笔记模式使用的模型服务。项目不包含 Memos 服务。
 
-2. Allow all users (leave empty or remove the variable):
+当前代码及 CI 兼容范围为 Memos **0.30.x、0.31.x 和 canary 开发版**。空间功能需要 Memos 0.31 或以上；具体业务兼容性以 CI 中对应版本的结果为准。
 
-   ```env
-   ALLOWED_USERNAMES=
-   ```
-
-#### Important Notes
-
-- Usernames must not include the @ symbol
-- When the allowlist is set, users must have a matching Telegram username. With no allowlist, users without a username can also use the bot.
-- Matching is case-insensitive and trims whitespace
-- Users outside the allowed list receive an error reply, including when they press a button on an earlier message.
-
-Memogram uses Memos' HTTP REST API. At startup it discovers `/api` (latest) or `/api/v1` (0.30/0.31) through the read-only instance profile endpoint.
-
-## Usage
-
-### Starting the Service
-
-#### Starting with binary
-
-1. Download and extract the released binary file;
-2. Create a `.env` file in the same directory as the binary file;
-3. Run the executable in the terminal:
-
-   ```sh
-   ./memogram
-   ```
-
-4. Once the bot is running, you can interact with it via your Telegram bot.
-
-#### Starting with Docker
-
-Or you can start the service with Docker:
-
-1. Build the Docker image: `sh scripts/build.sh docker -t memogram`. The script passes the version and commit from Git to the Docker build.
-2.  Run the Docker container with the required environment variables:
-
-    ```sh
-    docker run -d --name memogram \
-    --restart unless-stopped \
-    --mount type=volume,source=memogram-data,target=/data \
-    -e SERVER_ADDR=https://memos.example.com \
-    -e BOT_TOKEN=your_telegram_bot_token \
-    memogram
-    ```
-
-3. The container runs as UID/GID `65532`. The named volume retains token bindings when the container is recreated. For a bind mount, give this user write access to the mounted directory.
-
-Inside Docker, `localhost` refers to the Memogram container. Use your Memos service name (`http://memos:5230`) when both services share a Docker network. To connect to Memos on the host, use `http://host.docker.internal:5230` and add `--add-host host.docker.internal:host-gateway` to the run command.
-
-#### Starting with Docker Compose
-
-The repository includes `docker-compose.yml` with a persistent data volume:
+1. 创建 Telegram Bot，取得 Bot Token。
+2. 在 Memos 设置中创建个人访问令牌。
+3. AI 笔记模式准备兼容 Responses 或 Chat Completions 的供应商地址、密钥和模型 ID。
+4. 下载本仓库，或克隆到服务器：
 
 ```sh
-git clone https://github.com/usememos/telegram-integration memogram
-cd memogram
-cp .env.example .env
-# Edit .env: set BOT_TOKEN and a SERVER_ADDR reachable from the container.
-sh scripts/build.sh compose up -d --build
+git clone https://github.com/qaq112233/aimemos.git
+cd aimemos
+cp .env.notebook.example .env
+cp notebook.example.yaml notebook.yaml
+chmod 600 .env
 ```
 
-Compose supplies `DATA=/data/data.txt`, retains bindings in `memogram-data`, and configures `host.docker.internal` for connecting to Memos on the host. Use `SERVER_ADDR=http://host.docker.internal:5230` for that setup, or your instance's HTTPS URL.
+编辑 `.env`，填写 `SERVER_ADDR`、`BOT_TOKEN`、`MEMOS_TOKEN`、允许用户，以及供应商密钥。编辑 `notebook.yaml`，填写供应商地址与实际模型 ID，选择协议和读图能力。
 
-Update with `git pull --ff-only` followed by `sh scripts/build.sh compose up -d --build`. `docker compose down` preserves bindings; `docker compose down -v` removes them.
+即时保存模式使用 `cp .env.example .env`，无需 AI 配置和 `MEMOS_TOKEN`；启动后在私聊发送 `/start <Memos 个人访问令牌>` 绑定账号。
 
-### Interaction Commands
-
-- `/start <access_token>`: Link the bot using a Personal Access Token created in your Memos account settings.
-- Send text messages: Save the message content as a memo.
-- Send photos, documents, voice messages, or videos: Save the files as attachments in a memo.
-- `/search <words>`: Search for the memos.
-- `/space`: Choose a default space for new memos, or "No space" to keep them private. Requires Memos 0.31 or later.
-
-Each saved memo gets buttons to make it public or private, to pin it, and, on Memos 0.31 or later, to move it into one of your spaces. A memo placed in a space gets `SPACE` visibility, so that the space's members can see it. "No space" takes it out again and makes a `SPACE` memo private.
-
-If your default space is deleted or you leave it, the next memo is saved without it, the bot tells you so, and the default is cleared.
-
-If an attachment cannot be downloaded or uploaded, the bot replies that the memo was saved but the attachment failed, with a link to that memo. Downloads are limited to 20 MiB and HTTP requests have a 60-second timeout.
-
-## Development
-
-Requires Go 1.27.2 or newer. Linting uses [golangci-lint](https://golangci-lint.run) 2.15.0 with the settings in `.golangci.yml`; build it with that Go version or newer, for example `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0`.
+## 使用发布的 Docker 镜像
 
 ```sh
-go test -race ./...
-go vet ./...
-golangci-lint run
-sh scripts/build.sh
-./build/memogram --version
+docker pull ghcr.io/qaq112233/aimemos:v0.2.0
+docker volume create memogram-data
+docker run -d --name memogram --restart unless-stopped \
+  --env-file .env \
+  --add-host host.docker.internal:host-gateway \
+  -e DATA=/data/data.txt \
+  -v memogram-data:/data \
+  -v "$PWD/notebook.yaml:/app/notebook.yaml:ro" \
+  ghcr.io/qaq112233/aimemos:v0.2.0
+docker logs -f memogram
 ```
 
-Code layout:
+即时保存模式省略 `notebook.yaml` 挂载。镜像支持 `linux/amd64` 和 `linux/arm64`，以 UID/GID `65532:65532` 运行。`/data` 必须可写并持久化，绑定文件包含 Memos 访问令牌，应限制访问。
 
-- `cmd/memogram`: the entrypoint. It loads the configuration and wires the store, the Memos client and the bot together.
-- `internal/bot`: the Telegram handlers for memo capture, attachments, albums, commands and memo buttons.
-- `internal/memos`: the Memos client and API version discovery, built on the generated `internal/memosapi`.
-- `internal/config`: environment configuration.
-- `internal/store`: the file that binds Telegram users to access tokens.
-- `internal/version`: build metadata.
+容器内的 `localhost` 指容器本身。连接宿主机上的 Memos、AI 或代理时，使用 `host.docker.internal` 或实际可访问地址。修改 `.env` 后需重新创建容器；只修改 `notebook.yaml` 可重启容器。
 
-The REST client is generated from the versioned OpenAPI specifications in [usememos/dotcom](https://github.com/usememos/dotcom/tree/main/openapi). See [openapi/README.md](openapi/README.md) for generation and supported-version updates.
-
-To run the business compatibility scenarios, start a **fresh, disposable** Memos container and set `MEMOS_TEST_URL`:
+更新镜像时保留 `.env`、`notebook.yaml` 和数据卷：
 
 ```sh
-docker run --rm -d --name memogram-memos-test \
-  -e MEMOS_MODE=prod -p 127.0.0.1:5231:5230 neosmemo/memos:0.31.0
-MEMOS_TEST_URL=http://127.0.0.1:5231 go test -race -run '^TestMemosIntegration$' -count=1 -timeout=3m -v ./internal/bot
-docker rm -f memogram-memos-test
+docker pull ghcr.io/qaq112233/aimemos:v0.2.0
+docker stop memogram
+docker rm memogram
+# 使用上面的 docker run 命令重新创建容器，复用原有数据卷。
 ```
 
-CI runs the same scenarios against `canary` (latest development), `0.30.0`, and `0.31.0`, with the race detector enabled. Ordinary `go test` skips this integration test unless `MEMOS_TEST_URL` is set. The test creates an administrator for setup, then uses two ordinary users and their Personal Access Tokens for business operations. It refuses to run against an instance that already has users.
+源码构建和现有 Compose 文件的用法见[开发文档](docs/DEVELOPMENT.md)。
 
-The scenarios cover text saving and search; documents and images with or without captions; images sent as documents; voice and video uploads; sequential and concurrent albums; partial attachment failures and recovery; visibility and pin buttons; user isolation; permission denial; invalid or revoked tokens; and, on 0.31 and later, moving memos into and out of a space, the default space, and a default space that was deleted. On 0.30 they check that spaces are reported as unsupported. Uploaded files are downloaded from Memos and compared byte for byte. Images use a generated PNG; voice and video use small transport fixtures, without playback validation. Telegram responses are mocked; Memos API calls and file storage use the real server. An HTTP proxy injects the attachment service failure for the recovery scenario.
+## 使用发布的二进制
 
-Verify container startup and binding persistence separately:
+从本仓库 [Releases](https://github.com/qaq112233/aimemos/releases) 下载对应操作系统与 CPU 架构的压缩包，解压后按上述步骤准备 `.env` 和 `notebook.yaml`：
 
 ```sh
-sh scripts/build.sh docker -t memogram
-python3 scripts/test-container.py memogram
+./memogram --version
+./memogram --check-config notebook.yaml
+./memogram
 ```
 
-## Versioning and releases
+`--check-config` 只检查 YAML 结构，不验证运行时凭据、允许用户或服务连接。正式启动才会验证完整环境配置。程序从工作目录加载 `.env`，进程环境中的同名变量优先。
 
-This fork starts at **v0.1.0**, independently of upstream and Memos versions.
+## 日常操作
 
-- Stable release tags: `v0.1.0`, `v0.1.1`, and so on.
-- Release candidates: `v0.1.0-rc.1` (also mark the GitHub Release as a prerelease).
-- Binaries print the version without `v`, plus the source commit. Development builds retain `YY.MM.D-dev.<sha7>` metadata. Legacy upstream CalVer tags remain supported.
+AI 笔记模式中，连续发送的素材留在同一组；四秒状态提示不会自动生成或保存。
 
-### GitHub Actions
+| 操作 | 作用 |
+| --- | --- |
+| `1` / 原样保存 | 合并原文和来源后直接保存，不调用 AI |
+| `2` / 简单整理 | 只整理文字与图片说明，不发送图片像素 |
+| `3` / 教程整理 | 结合图片组织前提、步骤与注意事项 |
+| `4 本次提示词` | 按本次要求整理，默认读图 |
+| `5` / 图片理解 | 提取图片文字、数据和可见细节，生成笔记草稿 |
+| 普通文字 | 有草稿时作为修改要求；收集状态作为素材 |
+| 确认保存 / 补充素材 / 放弃本组 | 按钮操作当前用户的素材组和草稿 |
+| `/status`、`/model`、`/retry` | 查看状态、选择模型、重试整理 |
 
-`Build and publish` runs only from **Actions → Run workflow** or when a GitHub Release is **published** (saving a draft does not trigger it). Commits and tag pushes do not trigger publishing. CI runs on pushes to `main`, pull requests, or manually.
+即时保存模式支持文字、图片、文件、语音、视频、相册，另有 `/search <关键词>` 和 `/space`。保存后的按钮可切换可见性、置顶或所属空间。进入空间的笔记对该空间成员可见。
 
-1. Manual: select the branch/tag to build and enter a version (default `v0.1.0`). Download the Linux, macOS and Windows archives from the run's artifacts (retained for 14 days). The workflow also pushes the Docker image. It does not create a GitHub Release or change remote Git tags.
-2. Release: create and publish a Release in this fork with tag `v0.1.0`. The workflow builds that tag's code and attaches the archives to that same Release, preserving its title and notes. Use a tag pointing to the desired fork commit; inherited upstream tags can point to older code.
+## 环境变量
 
-Images are published to `ghcr.io/<owner>/<repository>`; for this repository:
+| 变量 | 用途 |
+| --- | --- |
+| `SERVER_ADDR` | 必填，Memos 地址，例如 `https://memos.example.com` |
+| `BOT_TOKEN` | 必填，Telegram Bot Token |
+| `ALLOWED_USERNAMES` | 允许的用户名列表，与下面的 ID 名单至少填写一项 |
+| `ALLOWED_USER_IDS` | 允许的正整数用户 ID 列表，逗号分隔 |
+| `TELEGRAM_USER_ID` | 兼容旧配置的 ID 字段，与 `ALLOWED_USER_IDS` 合并 |
+| `NOTEBOOK_CONFIG` | AI 笔记模式 YAML 路径，留空启用即时保存模式 |
+| `MEMOS_TOKEN` | AI 笔记模式必填，Memos 个人访问令牌 |
+| `CLIPROXY_API_KEY`、`COMPATIBLE_API_KEY` | 示例供应商密钥；实际名称由 `key_env` 决定 |
+| `PROXY_URL` | Telegram 和未单独配置的 AI 供应商共用的网络代理 |
+| `TELEGRAM_PROXY_URL` | Telegram API 和文件下载的专用网络代理 |
+| `BOT_PROXY_ADDR` | Telegram Bot API 服务地址，通常留空，不是 HTTP/SOCKS5 代理 |
+| `DATA` | 绑定文件路径；二进制默认 `data.txt`，容器默认 `/data/data.txt` |
 
-```sh
-docker pull ghcr.io/qaq112233/aimemos:v0.1.0
-```
+代理支持 HTTP、HTTPS、SOCKS5 和 `socks5h`，可包含用户名和密码。`direct` 强制直连；专用项留空时继承统一代理。所有层都未指定时，沿用 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`。供应商专用代理见[笔记模式配置](README_NOTEBOOK.md#网络代理)。
 
-Images support `linux/amd64` and `linux/arm64`. Each run publishes both `v0.1.0` and `0.1.0` tags (or the requested version). Only a stable published Release updates `latest`; manual builds and prereleases do not. Reusing a version replaces its image tags; use a new version for each release.
+## 升级到 v0.2.0
 
-Publishing uses the built-in `GITHUB_TOKEN` with `contents: write` for Release attachments and `packages: write` for GHCR; no separate registry secret is required. For anonymous pulls, set the GHCR package visibility to public after its first publication.
+1. 填写允许用户；旧版依赖空名单开放访问的部署必须调整，只有显式 `none` 才开放。
+2. 原有 `TELEGRAM_USER_ID` 仍可继续使用；仅按用户名授权也能运行 AI 笔记模式。
+3. 已有 YAML 如需显示新入口 `5`，添加示例中的 `profiles.vision` 与 `entries."5"`，保留自己的供应商、密钥引用和提示词。
+4. 保留绑定文件与数据卷。重启前先处理内存中的素材、草稿和待补传附件。
 
-### Local verification
+## 验证与边界
 
-```sh
-MEMOGRAM_VERSION=v0.1.0 sh scripts/build.sh
-./build/memogram --version
-MEMOGRAM_VERSION=v0.1.0 sh scripts/build.sh docker -t memogram:v0.1.0
-```
+全量 Go 测试包含竞态检查，模拟服务测试覆盖访问规则、用户会话隔离、两种 AI 协议、多图、草稿修改和确认保存。发布流程另外检查构建产物，并构建多架构镜像。真实模型的识图质量、服务商扩展参数和实际部署连通性需要使用对应服务验证。
 
-Direct Docker builds must supply `VERSION=0.1.0` and `COMMIT=<source SHA>` as build arguments. The Docker context excludes `.git`.
-
-`python3 scripts/test-release.py` uses GoReleaser 2.18.3 in a temporary clone to package stable, candidate and legacy releases, then verifies the native archived binary's version. It neither publishes nor modifies the working repository's tags.
+同一进程内，已知成功的保存不会因重复确认再次创建正文。Memos 写入成功但返回前断网时，结果可能不确定，重试前请检查笔记；跨重启不承诺去重。图片每次下载最多 20 MiB，默认每次生成最多读取八张。

@@ -31,9 +31,8 @@ type Config struct {
 	TelegramProxyURL string
 	// DataPath is the file that stores user bindings (DATA).
 	DataPath string
-	// AllowedUsernames lists lowercase Telegram usernames allowed to use the
-	// bot (ALLOWED_USERNAMES, comma-separated). Empty allows everyone.
-	AllowedUsernames []string
+	Access   Access
+	Notebook *Notebook
 }
 
 // Load reads the configuration from the environment, after loading a .env
@@ -55,7 +54,6 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 		ProxyURL:         strings.TrimSpace(getenv("PROXY_URL")),
 		TelegramProxyURL: strings.TrimSpace(getenv("TELEGRAM_PROXY_URL")),
 		DataPath:         strings.TrimSpace(getenv("DATA")),
-		AllowedUsernames: parseUsernames(getenv("ALLOWED_USERNAMES")),
 	}
 	serverAddr := getenv("SERVER_ADDR")
 	if strings.TrimSpace(serverAddr) == "" {
@@ -80,15 +78,17 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 	if cfg.DataPath == "" {
 		cfg.DataPath = DefaultDataPath
 	}
-	return cfg, nil
-}
-
-func parseUsernames(raw string) []string {
-	var usernames []string
-	for entry := range strings.SplitSeq(raw, ",") {
-		if username := strings.ToLower(strings.TrimSpace(entry)); username != "" {
-			usernames = append(usernames, username)
+	if path := strings.TrimSpace(getenv("NOTEBOOK_CONFIG")); path != "" {
+		cfg.Notebook, err = loadNotebook(path, getenv)
+		if err != nil {
+			return nil, fmt.Errorf("NOTEBOOK_CONFIG: %w", err)
+		}
+		cfg.Access = cfg.Notebook.Access
+	} else {
+		cfg.Access, err = readAccess(getenv, "")
+		if err != nil {
+			return nil, err
 		}
 	}
-	return usernames
+	return cfg, nil
 }

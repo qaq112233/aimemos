@@ -56,19 +56,14 @@ func run() int {
 		return 1
 	}
 	opts := bot.Options{
-		Token:            cfg.BotToken,
-		ServerURL:        cfg.BotProxyAddr,
-		ProxyURL:         cfg.TelegramProxyURL,
-		Memos:            memos.NewClient(cfg.ServerAddr),
-		Store:            data,
-		AllowedUsernames: cfg.AllowedUsernames,
+		Token:     cfg.BotToken,
+		ServerURL: cfg.BotProxyAddr,
+		ProxyURL:  cfg.TelegramProxyURL,
+		Memos:     memos.NewClient(cfg.ServerAddr),
+		Store:     data,
+		Access:    cfg.Access,
 	}
-	if path := os.Getenv("NOTEBOOK_CONFIG"); path != "" {
-		notebook, err := config.LoadNotebook(path)
-		if err != nil {
-			slog.Error("invalid notebook configuration", slog.Any("err", err))
-			return 1
-		}
+	if notebook := cfg.Notebook; notebook != nil {
 		opts.Notebook = notebook
 		notebook.ProxyURL = cfg.ProxyURL
 		opts.NewGenerator = func(fetch workflow.Fetch) workflow.Generator { return ai.New(notebook, fetch) }

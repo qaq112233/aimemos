@@ -19,6 +19,15 @@ builds:
 
 archives:
   - formats: [tar.gz]
+    files:
+      - README.md
+      - README_NOTEBOOK.md
+      - CHANGELOG.md
+      - notebook.example.yaml
+      - .env.example
+      - .env.notebook.example
+      - docs/*.md
+      - openapi/README.md
     # this name template makes the OS and Arch compatible with the results of `uname`.
     name_template: >-
       memogram_{{ .Tag }}_{{ .Os }}_{{ .Arch }}
