@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/go-telegram/bot/models"
 	"go.yaml.in/yaml/v3"
@@ -162,5 +163,36 @@ func TestNotebookPrivateUserRestrictionAndExactEntryRules(t *testing.T) {
 		if _, _, ok := parseEntry(cfg, text); ok {
 			t.Errorf("accepted partial match %q", text)
 		}
+	}
+}
+
+func TestNotebookPreservesCompleteSourceURLs(t *testing.T) {
+	link := "https://example.test/wiki/Go_(language)"
+	text := "😀 " + link + "。"
+	for _, caption := range []bool{false, true} {
+		t.Run(fmt.Sprintf("caption=%t", caption), func(t *testing.T) {
+			m := textMessage(42, text)
+			m.Entities = []models.MessageEntity{{Type: models.MessageEntityTypeURL, Offset: 3, Length: len(utf16.Encode([]rune(link)))}}
+			if caption {
+				m.Text, m.Caption, m.CaptionEntities, m.Entities = "", m.Text, m.Entities, nil
+			}
+			material, ok := notebookMaterial(m)
+			if !ok || len(material.Sources) != 1 || material.Sources[0] != link || material.Text != text {
+				t.Fatalf("corrupted URL or raw text: %+v", material)
+			}
+		})
+	}
+	for _, text := range []string{link, "(" + link + ").", "[source](" + link + ")"} {
+		material, ok := notebookMaterial(textMessage(42, text))
+		if !ok || len(material.Sources) != 1 || material.Sources[0] != link {
+			t.Fatalf("fallback corrupted source %q: %+v", text, material)
+		}
+	}
+	// A forwarded sender link must not include the Markdown closing parenthesis.
+	m := textMessage(42, "source")
+	m.ForwardOrigin = &models.MessageOrigin{MessageOriginUser: &models.MessageOriginUser{SenderUser: models.User{FirstName: "Author", Username: "author"}}}
+	material, _ := notebookMaterial(m)
+	if len(material.Sources) != 1 || material.Sources[0] != "https://t.me/author" {
+		t.Fatalf("corrupted forwarded sender link: %+v", material.Sources)
 	}
 }

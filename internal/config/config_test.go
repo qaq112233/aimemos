@@ -56,3 +56,23 @@ func TestFromEnvKeepsDataPath(t *testing.T) {
 		t.Fatalf("got %+v, %v", cfg, err)
 	}
 }
+
+func TestProxyEnvironmentPrecedenceAndValidation(t *testing.T) {
+	for _, tc := range []struct{ shared, telegram, want string }{
+		{"", "", ""},
+		{"http://shared.test:8080", "", "http://shared.test:8080"},
+		{"http://shared.test:8080", "socks5://telegram.test:1080", "socks5://telegram.test:1080"},
+		{"socks5://shared.test:1080", "direct", "direct"},
+	} {
+		cfg, err := FromEnv(env(map[string]string{"SERVER_ADDR": "localhost", "BOT_TOKEN": "t", "PROXY_URL": tc.shared, "TELEGRAM_PROXY_URL": tc.telegram}))
+		if err != nil || cfg.TelegramProxyURL != tc.want || cfg.ProxyURL != tc.shared {
+			t.Fatalf("proxy precedence: cfg=%+v err=%v", cfg, err)
+		}
+	}
+	for _, field := range []string{"PROXY_URL", "TELEGRAM_PROXY_URL"} {
+		_, err := FromEnv(env(map[string]string{"SERVER_ADDR": "localhost", "BOT_TOKEN": "t", field: "ftp://user:SECRET@proxy.test"}))
+		if err == nil || !strings.Contains(err.Error(), field) || strings.Contains(err.Error(), "SECRET") {
+			t.Fatalf("invalid %s accepted or leaked: %v", field, err)
+		}
+	}
+}

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/usememos/memogram/internal/netproxy"
 )
 
 // Notebook is fixed configuration. Secrets are resolved only from environment
@@ -32,13 +34,38 @@ type Notebook struct {
 	CommonTags    []string            `yaml:"common_tags"`
 	UserID        int64               `yaml:"-"`
 	MemosToken    string              `yaml:"-"`
+	ProxyURL      string              `yaml:"-"` // Shared PROXY_URL, supplied by startup configuration.
 }
 
 type Provider struct {
-	BaseURL string            `yaml:"base_url"`
-	KeyEnv  string            `yaml:"key_env"`
-	Timeout time.Duration     `yaml:"timeout"`
-	Headers map[string]string `yaml:"headers"`
+	BaseURL  string            `yaml:"base_url"`
+	KeyEnv   string            `yaml:"key_env"`
+	Timeout  time.Duration     `yaml:"timeout"`
+	Headers  map[string]string `yaml:"headers"`
+	ProxyURL string            `yaml:"proxy_url"`
+	ProxyEnv string            `yaml:"proxy_env"`
+}
+
+// NetworkProxy resolves a provider override without exposing proxy credentials.
+// An explicitly named but unset environment variable is an error, not a fallback.
+func (p Provider) NetworkProxy(shared string) (string, error) {
+	value := strings.TrimSpace(p.ProxyURL)
+	if value != "" && p.ProxyEnv != "" {
+		return "", errors.New("set only one of proxy_url and proxy_env")
+	}
+	if p.ProxyEnv != "" {
+		value = strings.TrimSpace(os.Getenv(p.ProxyEnv))
+		if value == "" {
+			return "", errors.New("provider proxy_env is unset or empty")
+		}
+	}
+	if value == "" {
+		value = shared
+	}
+	if _, err := netproxy.Parse(value); err != nil {
+		return "", err
+	}
+	return value, nil
 }
 
 type Model struct {
@@ -100,14 +127,14 @@ func ReadNotebook(path string) (*Notebook, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var c Notebook
 	d := yaml.NewDecoder(f)
 	d.KnownFields(true)
 	if err := d.Decode(&c); err != nil {
 		return nil, err
 	}
-	if err := d.Decode(new(any)); err != io.EOF {
+	if err := d.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return nil, errors.New("expected one YAML document")
 	}
 	if err := c.Validate(); err != nil {
@@ -143,6 +170,12 @@ func (c *Notebook) Validate() error {
 		return errors.New("system_prompt and tag_prompt are required")
 	}
 	for name, p := range c.Providers {
+		if strings.TrimSpace(p.ProxyURL) != "" && p.ProxyEnv != "" {
+			return fmt.Errorf("provider %s: set only one of proxy_url and proxy_env", name)
+		}
+		if _, err := netproxy.Parse(p.ProxyURL); err != nil {
+			return fmt.Errorf("provider %s: %w", name, err)
+		}
 		u, err := url.Parse(p.BaseURL)
 		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || p.Timeout <= 0 {
 			return fmt.Errorf("invalid provider %s URL or timeout", name)
@@ -167,11 +200,11 @@ func (c *Notebook) Validate() error {
 			if !regexp.MustCompile(`^[a-z_][a-z_0-9]*(\.[a-z_][a-z_0-9]*)*$`).MatchString(field) {
 				return fmt.Errorf("model %s: invalid reasoning_budget_field", name)
 			}
-			if err := validateParameters(Parameters{Extra: map[string]any{strings.Split(field, ".")[0]: true}}); err != nil {
+			if err := ValidateParameters(Parameters{Extra: map[string]any{strings.Split(field, ".")[0]: true}}); err != nil {
 				return fmt.Errorf("model %s: %w", name, err)
 			}
 		}
-		if err := validateParameters(m.Defaults); err != nil {
+		if err := ValidateParameters(m.Defaults); err != nil {
 			return fmt.Errorf("model %s: %w", name, err)
 		}
 	}
@@ -179,7 +212,7 @@ func (c *Notebook) Validate() error {
 		if _, ok := c.Models[p.Model]; !ok || p.Prompt == "" {
 			return fmt.Errorf("profile %s: unknown model or empty prompt", name)
 		}
-		if err := validateParameters(p.Parameters); err != nil {
+		if err := ValidateParameters(p.Parameters); err != nil {
 			return fmt.Errorf("profile %s: %w", name, err)
 		}
 	}
@@ -200,7 +233,9 @@ func (c *Notebook) Validate() error {
 	return nil
 }
 
-func validateParameters(p Parameters) error {
+// ValidateParameters applies the same request boundary to fixed configuration
+// and temporary overrides supplied by the application.
+func ValidateParameters(p Parameters) error {
 	if p.MaxTokens != nil && *p.MaxTokens <= 0 {
 		return errors.New("max_tokens must be positive")
 	}
@@ -208,7 +243,7 @@ func validateParameters(p Parameters) error {
 	// authentication, tool calls, or server-side conversation state.
 	for k := range p.Extra {
 		switch k {
-		case "model", "messages", "input", "instructions", "prompt", "tools", "tool_choice", "stream", "store", "previous_response_id", "conversation", "background", "service_tier", "headers", "extra_headers", "authorization", "api_key", "base_url":
+		case "model", "messages", "input", "instructions", "prompt", "tools", "tool_choice", "functions", "function_call", "stream", "store", "previous_response_id", "conversation", "background", "service_tier", "headers", "extra_headers", "authorization", "api_key", "base_url":
 			return fmt.Errorf("extra.%s is reserved", k)
 		}
 	}

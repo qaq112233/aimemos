@@ -18,6 +18,7 @@ import (
 	"github.com/usememos/memogram/internal/config"
 	"github.com/usememos/memogram/internal/memos"
 	"github.com/usememos/memogram/internal/memosapi"
+	"github.com/usememos/memogram/internal/netproxy"
 	"github.com/usememos/memogram/internal/store"
 	"github.com/usememos/memogram/internal/workflow"
 )
@@ -41,6 +42,8 @@ type Options struct {
 	Token string
 	// ServerURL optionally replaces the Telegram Bot API server.
 	ServerURL string
+	// ProxyURL applies to both Bot API calls and attachment downloads.
+	ProxyURL string
 	// Memos is the unauthenticated client for the Memos instance. Each request
 	// derives a client that authenticates as the sending user.
 	Memos *memos.Client
@@ -90,6 +93,10 @@ func New(opts Options) (*Service, error) {
 	if opts.Memos == nil || opts.Store == nil {
 		return nil, errors.New("a Memos client and a token store are required")
 	}
+	transport, err := netproxy.Transport(opts.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("telegram proxy: %w", err)
+	}
 	s := &Service{
 		memos:     opts.Memos,
 		store:     opts.Store,
@@ -99,7 +106,7 @@ func New(opts Options) (*Service, error) {
 		linkBase:  opts.Memos.BaseURL(),
 	}
 	if s.downloads == nil {
-		s.downloads = &http.Client{Timeout: 60 * time.Second}
+		s.downloads = &http.Client{Timeout: 60 * time.Second, Transport: transport}
 	}
 	s.spaces.Store(true)
 	for _, username := range opts.AllowedUsernames {
@@ -107,6 +114,7 @@ func New(opts Options) (*Service, error) {
 	}
 
 	botOptions := []bot.Option{
+		bot.WithHTTPClient(time.Minute, &http.Client{Timeout: time.Minute, Transport: transport}),
 		bot.WithMiddlewares(s.authorize),
 		bot.WithDefaultHandler(s.handleMessage),
 		bot.WithErrorsHandler(func(err error) {

@@ -58,6 +58,7 @@ func run() int {
 	opts := bot.Options{
 		Token:            cfg.BotToken,
 		ServerURL:        cfg.BotProxyAddr,
+		ProxyURL:         cfg.TelegramProxyURL,
 		Memos:            memos.NewClient(cfg.ServerAddr),
 		Store:            data,
 		AllowedUsernames: cfg.AllowedUsernames,
@@ -69,6 +70,7 @@ func run() int {
 			return 1
 		}
 		opts.Notebook = notebook
+		notebook.ProxyURL = cfg.ProxyURL
 		opts.NewGenerator = func(fetch workflow.Fetch) workflow.Generator { return ai.New(notebook, fetch) }
 	}
 	service, err := bot.New(opts)

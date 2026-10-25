@@ -32,6 +32,8 @@ DATA=data.txt
 - `SERVER_ADDR`: The full HTTP or HTTPS base URL of your Memos instance, such as `https://memos.example.com`. Legacy `dns:localhost:5230` and bare host addresses are still accepted and normalized to HTTP.
 - `BOT_TOKEN`: Your Telegram bot token
 - `BOT_PROXY_ADDR`: Optional alternative Telegram API server URL (leave empty if not needed). This is not an HTTP CONNECT proxy.
+- `PROXY_URL`: Optional shared network proxy for Telegram and AI providers. Accepts `http://`, `https://`, `socks5://`, `socks5h://`, or `direct`. This setting applies to Telegram and AI traffic; Memos keeps its existing connection settings.
+- `TELEGRAM_PROXY_URL`: Optional Telegram override, including Bot API calls and attachment downloads. Empty inherits `PROXY_URL`; `direct` bypasses proxies. AI provider overrides are configured in `notebook.yaml`; see [network proxy configuration](README_NOTEBOOK.md#网络代理).
 - `ALLOWED_USERNAMES`: Optional comma-separated list of allowed usernames (without @ symbol)
 - `DATA`: Token binding file, defaulting to `data.txt` for binaries and `/data/data.txt` inside the container. Its parent directory must be writable. Persist this file across upgrades and keep it private: it contains Memos access tokens. It holds one JSON object per user. Files written by versions before Spaces support are read as before and converted on the next change, so downgrading after that point requires every user to send `/start` again.
 

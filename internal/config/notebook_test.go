@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,7 +38,7 @@ func TestNotebookExampleAndSecretReferences(t *testing.T) {
 }
 
 func TestNotebookRejectsInputOverridesAndInvalidProtocols(t *testing.T) {
-	for _, field := range []string{"input", "messages", "model", "tools", "store", "previous_response_id", "conversation"} {
+	for _, field := range []string{"input", "messages", "model", "tools", "functions", "function_call", "store", "previous_response_id", "conversation"} {
 		cfg, err := ReadNotebook("../../notebook.example.yaml")
 		if err != nil {
 			t.Fatal(err)
@@ -58,5 +59,43 @@ func TestNotebookRejectsInputOverridesAndInvalidProtocols(t *testing.T) {
 	cfg.Models["primary"] = m
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("accepted implicit protocol routing")
+	}
+}
+
+func TestProviderProxyOverridesAndSecretReference(t *testing.T) {
+	t.Setenv("UNIT_PROVIDER_PROXY", "socks5://user:pass@provider.test:1080")
+	for _, tc := range []struct {
+		provider Provider
+		want     string
+	}{
+		{Provider{}, "http://shared.test:8080"},
+		{Provider{ProxyURL: "direct"}, "direct"},
+		{Provider{ProxyURL: "http://provider.test:8080"}, "http://provider.test:8080"},
+		{Provider{ProxyEnv: "UNIT_PROVIDER_PROXY"}, "socks5://user:pass@provider.test:1080"},
+	} {
+		got, err := tc.provider.NetworkProxy("http://shared.test:8080")
+		if err != nil || got != tc.want {
+			t.Fatalf("wrong provider proxy: got=%q err=%v", got, err)
+		}
+	}
+	t.Setenv("UNIT_MISSING_PROXY", "")
+	if _, err := (Provider{ProxyEnv: "UNIT_MISSING_PROXY"}).NetworkProxy("http://shared.test:8080"); err == nil {
+		t.Fatal("missing explicit proxy silently fell back to shared proxy")
+	}
+	t.Setenv("UNIT_BAD_PROXY", "ftp://user:SECRET@proxy.test")
+	if _, err := (Provider{ProxyEnv: "UNIT_BAD_PROXY"}).NetworkProxy(""); err == nil || strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("bad proxy accepted or leaked: %v", err)
+	}
+	for _, provider := range []Provider{{ProxyURL: "http://proxy.test", ProxyEnv: "UNIT_PROVIDER_PROXY"}, {ProxyURL: "ftp://proxy.test"}} {
+		cfg, err := ReadNotebook("../../notebook.example.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		original := cfg.Providers["cli_proxy"]
+		original.ProxyURL, original.ProxyEnv = provider.ProxyURL, provider.ProxyEnv
+		cfg.Providers["cli_proxy"] = original
+		if err := cfg.Validate(); err == nil {
+			t.Fatal("invalid provider proxy passed static YAML validation")
+		}
 	}
 }

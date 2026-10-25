@@ -174,10 +174,10 @@ func TestSavingOlderSnapshotRetainsNewMaterial(t *testing.T) {
 func TestFailuresKeepContentAndIncompleteDraftCannotSave(t *testing.T) {
 	dst := &destination{createFail: true}
 	s := New(settings(), generatorFunc(func(context.Context, Request) (Result, error) { return Result{Text: "good"}, nil }), dst)
-	v := add(t, s, Material{ID: 1, Text: "source"})
-	v = generate(t, s, "tidy", "")
+	add(t, s, Material{ID: 1, Text: "source"})
+	generate(t, s, "tidy", "")
 	s.gen = generatorFunc(func(context.Context, Request) (Result, error) { return Result{}, errors.New("offline") })
-	v = generate(t, s, "", "revision")
+	v := generate(t, s, "", "revision")
 	if v.Draft.Text != "good" || v.Draft.Version != 1 || v.Count != 1 {
 		t.Fatal("AI failure destroyed content")
 	}
@@ -243,5 +243,30 @@ func TestCollectKeepsDraftAndRestartClears(t *testing.T) {
 	}
 	if New(cfg, nil, dst).Status(session).Group != "" {
 		t.Fatal("session unexpectedly persisted")
+	}
+}
+
+func TestRejectedFirstMaterialDoesNotCreateAnEmptyGroup(t *testing.T) {
+	cfg := settings()
+	cfg.MaxTextBytes = 3
+	s := New(cfg, nil, &destination{})
+	if _, err := s.Add(session, Material{ID: 1, Text: "too long"}); err == nil {
+		t.Fatal("accepted oversized material")
+	}
+	if v := s.Status(session); v.Group != "" || v.Count != 0 {
+		t.Fatalf("rejected material left a saveable empty group: %+v", v)
+	}
+	if _, _, err := s.BeginSave(session, "", 0, true); err == nil {
+		t.Fatal("allowed empty save after rejecting the first material")
+	}
+}
+
+func TestRawSavePreservesSourcesOutsideText(t *testing.T) {
+	dst := &destination{}
+	s := New(settings(), nil, dst)
+	v := add(t, s, Material{ID: 1, Text: "original", Sources: []string{"https://source.test/article"}})
+	save(t, s, v.Group, 0, true)
+	if len(dst.contents) != 1 || !strings.Contains(dst.contents[0], "https://source.test/article") {
+		t.Fatalf("raw save lost source: %+v", dst.contents)
 	}
 }

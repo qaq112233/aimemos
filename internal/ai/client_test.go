@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/usememos/memogram/internal/config"
+	"github.com/usememos/memogram/internal/testproxy"
 	"github.com/usememos/memogram/internal/workflow"
 )
 
@@ -149,7 +151,7 @@ func TestTruncationAndNoRetryOrFallback(t *testing.T) {
 						fmt.Fprint(w, `{"choices":[{"message":{"content":"partial"},"finish_reason":"length"}]}`)
 					}
 				} else {
-					w.WriteHeader(429)
+					w.WriteHeader(http.StatusTooManyRequests)
 					fmt.Fprint(w, `{"error":{"message":"SECRET-DO-NOT-LOG","type":"rate_limit"}}`)
 				}
 			}))
@@ -164,6 +166,117 @@ func TestTruncationAndNoRetryOrFallback(t *testing.T) {
 			_, err = client.Generate(context.Background(), r)
 			if err == nil || strings.Contains(err.Error(), "SECRET") || calls != 2 {
 				t.Fatalf("retried or leaked response: %v calls=%d", err, calls)
+			}
+		})
+	}
+}
+
+func TestRequestParametersCannotEnableToolsOrServerState(t *testing.T) {
+	for _, protocol := range []string{"responses", "chat_completions"} {
+		for _, field := range []string{"tools", "previous_response_id", "conversation", "stream", "functions", "function_call"} {
+			t.Run(protocol+"/"+field, func(t *testing.T) {
+				calls := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					calls++
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `{"status":"completed","output":[],"choices":[{"message":{"content":"draft"},"finish_reason":"stop"}]}`)
+				}))
+				defer server.Close()
+				cfg := &config.Notebook{Providers: map[string]config.Provider{"p": {BaseURL: server.URL, Timeout: time.Second}}, Models: map[string]config.Model{"m": {Provider: "p", ID: "model", Protocol: protocol}}}
+				_, err := New(cfg, nil).Generate(context.Background(), workflow.Request{Model: "m", Parameters: config.Parameters{Extra: map[string]any{field: "override"}}})
+				if err == nil || calls != 0 {
+					t.Fatalf("reserved temporary field reached provider: err=%v calls=%d", err, calls)
+				}
+			})
+		}
+	}
+}
+
+func TestProvidersDoNotInheritSDKEnvironmentHeaders(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "unrelated-key")
+	t.Setenv("OPENAI_ADMIN_KEY", "unrelated-admin")
+	t.Setenv("OPENAI_ORG_ID", "unrelated-org")
+	t.Setenv("OPENAI_PROJECT_ID", "unrelated-project")
+	t.Setenv("OPENAI_CUSTOM_HEADERS", "X-Unrelated-Secret: unrelated-secret")
+	t.Setenv("PROVIDER_KEY", "provider-key")
+	for _, protocol := range []string{"responses", "chat_completions"} {
+		t.Run(protocol, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				for _, header := range []string{"OpenAI-Organization", "OpenAI-Project", "X-Unrelated-Secret"} {
+					if r.Header.Get(header) != "" {
+						t.Errorf("inherited unrelated SDK header %s", header)
+					}
+				}
+				if r.Header.Get("Authorization") != "Bearer provider-key" || r.Header.Get("X-Provider") != "configured" {
+					t.Error("lost explicit provider settings")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"draft"}]}],"choices":[{"message":{"content":"draft"},"finish_reason":"stop"}]}`)
+			}))
+			defer server.Close()
+			cfg := &config.Notebook{Providers: map[string]config.Provider{"p": {BaseURL: server.URL, KeyEnv: "PROVIDER_KEY", Timeout: time.Second, Headers: map[string]string{"X-Provider": "configured"}}}, Models: map[string]config.Model{"m": {Provider: "p", ID: "model", Protocol: protocol}}}
+			result, err := New(cfg, nil).Generate(context.Background(), workflow.Request{Model: "m"})
+			if err != nil || result.Text != "draft" {
+				t.Fatalf("provider request failed: %+v %v", result, err)
+			}
+		})
+	}
+}
+
+func TestProviderProxyRoutingAndIsolation(t *testing.T) {
+	for _, protocol := range []string{"responses", "chat_completions"} {
+		t.Run(protocol, func(t *testing.T) {
+			var mu sync.Mutex
+			counts := map[string]int{}
+			handler := func(route string) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					mu.Lock()
+					counts[route]++
+					mu.Unlock()
+					wantPath := "/v1/responses"
+					if protocol == "chat_completions" {
+						wantPath = "/v1/chat/completions"
+					}
+					if r.URL.Path != wantPath {
+						t.Errorf("wrong proxy destination: %s", r.URL)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"draft"}]}],"choices":[{"message":{"content":"draft"},"finish_reason":"stop"}]}`)
+				}
+			}
+			shared := httptest.NewServer(handler("shared"))
+			defer shared.Close()
+			dedicated := httptest.NewServer(handler("dedicated"))
+			defer dedicated.Close()
+			backend := httptest.NewServer(handler("backend"))
+			defer backend.Close()
+			socks := testproxy.NewSOCKS5(t, strings.TrimPrefix(backend.URL, "http://"), false)
+			cfg := &config.Notebook{ProxyURL: shared.URL, Providers: map[string]config.Provider{
+				"shared":    {BaseURL: "http://provider.invalid/v1", Timeout: time.Second},
+				"dedicated": {BaseURL: "http://provider.invalid/v1", ProxyURL: dedicated.URL, Timeout: time.Second},
+				"socks":     {BaseURL: "http://socks-provider.invalid/v1", ProxyURL: socks.URL, Timeout: time.Second},
+				"direct":    {BaseURL: backend.URL + "/v1", ProxyURL: "direct", Timeout: time.Second},
+			}, Models: map[string]config.Model{}}
+			for name := range cfg.Providers {
+				cfg.Models[name] = config.Model{Provider: name, ID: "model", Protocol: protocol}
+			}
+			client := New(cfg, nil)
+			defer func() {
+				for _, httpClient := range client.clients {
+					httpClient.CloseIdleConnections()
+				}
+			}()
+			for _, name := range []string{"shared", "dedicated", "socks", "direct", "shared"} {
+				result, err := client.Generate(context.Background(), workflow.Request{Model: name})
+				if err != nil || result.Text != "draft" {
+					t.Fatalf("%s proxy routing failed: %+v %v", name, result, err)
+				}
+			}
+			targets, _, _ := socks.Snapshot()
+			mu.Lock()
+			defer mu.Unlock()
+			if counts["shared"] != 2 || counts["dedicated"] != 1 || counts["backend"] != 2 || len(targets) != 1 || targets[0] != "socks-provider.invalid:80" || len(client.clients) != 4 {
+				t.Fatalf("proxy leakage, incorrect routing or unused clients: counts=%v targets=%v", counts, targets)
 			}
 		})
 	}

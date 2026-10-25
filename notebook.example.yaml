@@ -12,10 +12,16 @@ providers:
     key_env: CLIPROXY_API_KEY
     timeout: 180s
     headers: {}
+    # Optional provider override; omitted/empty inherits .env PROXY_URL.
+    # Use direct for a local service when other traffic needs a proxy.
+    # proxy_url: direct
   compatible:
     base_url: https://api.deepseek.com/v1
     key_env: COMPATIBLE_API_KEY
     timeout: 180s
+    # Set only one of proxy_url and proxy_env. Keep authenticated URLs in .env.
+    # proxy_url: http://host.docker.internal:7890
+    # proxy_env: COMPATIBLE_PROXY_URL
 
 models:
   primary:

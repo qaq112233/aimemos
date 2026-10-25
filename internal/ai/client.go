@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -19,15 +20,41 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 
 	"github.com/usememos/memogram/internal/config"
+	"github.com/usememos/memogram/internal/netproxy"
 	"github.com/usememos/memogram/internal/workflow"
 )
 
 type Client struct {
-	cfg   *config.Notebook
-	fetch workflow.Fetch
+	cfg     *config.Notebook
+	fetch   workflow.Fetch
+	mu      sync.Mutex
+	clients map[string]*http.Client
 }
 
-func New(cfg *config.Notebook, fetch workflow.Fetch) *Client { return &Client{cfg: cfg, fetch: fetch} }
+func New(cfg *config.Notebook, fetch workflow.Fetch) *Client {
+	return &Client{cfg: cfg, fetch: fetch, clients: make(map[string]*http.Client)}
+}
+
+// Reuse each provider's connection pool rather than leaving a new proxy
+// transport and its idle connections behind after every generation.
+func (c *Client) providerClient(name string, p config.Provider) (*http.Client, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if client := c.clients[name]; client != nil {
+		return client, nil
+	}
+	proxyURL, err := p.NetworkProxy(c.cfg.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("供应商 %s 代理配置无效：%w", name, err)
+	}
+	transport, err := netproxy.Transport(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("供应商 %s 代理配置无效：%w", name, err)
+	}
+	client := &http.Client{Timeout: p.Timeout, Transport: transport}
+	c.clients[name] = client
+	return client, nil
+}
 
 func (c *Client) Generate(ctx context.Context, req workflow.Request) (workflow.Result, error) {
 	m, ok := c.cfg.Models[req.Model]
@@ -38,6 +65,9 @@ func (c *Client) Generate(ctx context.Context, req workflow.Request) (workflow.R
 	layers := []config.Parameters{m.Defaults, req.Profile.Parameters, req.Parameters}
 	budget := false
 	for _, layer := range layers {
+		if err := config.ValidateParameters(layer); err != nil {
+			return workflow.Result{}, fmt.Errorf("AI 参数无效：%w", err)
+		}
 		budget = budget || layer.ReasoningBudget != nil
 	}
 	if budget && m.ReasoningBudgetField == "" {
@@ -56,13 +86,18 @@ func (c *Client) Generate(ctx context.Context, req workflow.Request) (workflow.R
 	if p.KeyEnv != "" && key == "" {
 		return workflow.Result{}, fmt.Errorf("请设置供应商 %s 的 %s 环境变量", m.Provider, p.KeyEnv)
 	}
+	httpClient, err := c.providerClient(m.Provider, p)
+	if err != nil {
+		return workflow.Result{}, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, p.Timeout)
 	defer cancel()
-	opts := []option.RequestOption{option.WithBaseURL(strings.TrimRight(p.BaseURL, "/") + "/"), option.WithAPIKey(key), option.WithMaxRetries(0), option.WithHTTPClient(&http.Client{Timeout: p.Timeout})}
+	// Construct SDK services with only this provider's options. NewClient also
+	// reads global OPENAI_* headers, which may belong to another provider.
+	opts := []option.RequestOption{option.WithBaseURL(strings.TrimRight(p.BaseURL, "/") + "/"), option.WithAPIKey(key), option.WithMaxRetries(0), option.WithHTTPClient(httpClient)}
 	for name, value := range p.Headers {
 		opts = append(opts, option.WithHeader(name, value))
 	}
-	client := openai.NewClient(opts...)
 	system := c.cfg.SystemPrompt + "\n\n" + req.Profile.Prompt
 	if req.Profile.Tags {
 		system += "\n\n" + c.cfg.TagPrompt + "\n常用标签：" + strings.Join(c.cfg.CommonTags, ", ")
@@ -132,7 +167,8 @@ func (c *Client) Generate(ctx context.Context, req workflow.Request) (workflow.R
 		}
 		body["instructions"] = system
 		body["input"] = []map[string]any{{"role": "user", "content": parts}}
-		result, err := client.Responses.New(ctx, param.Override[responses.ResponseNewParams](body))
+		service := responses.NewResponseService(opts...)
+		result, err := service.New(ctx, param.Override[responses.ResponseNewParams](body))
 		if err != nil {
 			return workflow.Result{}, safeError(err)
 		}
@@ -143,7 +179,8 @@ func (c *Client) Generate(ctx context.Context, req workflow.Request) (workflow.R
 		parts = append(parts, map[string]any{"type": "text", "text": fmt.Sprintf("materials[%d] image attachment", image.Material-1)}, map[string]any{"type": "image_url", "image_url": map[string]any{"url": image.URL}})
 	}
 	body["messages"] = []map[string]any{{"role": "system", "content": system}, {"role": "user", "content": parts}}
-	result, err := client.Chat.Completions.New(ctx, param.Override[openai.ChatCompletionNewParams](body))
+	service := openai.NewChatCompletionService(opts...)
+	result, err := service.New(ctx, param.Override[openai.ChatCompletionNewParams](body))
 	if err != nil {
 		return workflow.Result{}, safeError(err)
 	}

@@ -12,9 +12,10 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 
-def main():
+def main(proxy_mode="direct"):
     binary = Path(sys.argv[1] if len(sys.argv) > 1 else "build/memogram").resolve()
     sample = Path(__file__).resolve().parents[1] / "notebook.example.yaml"
     lock = threading.Lock()
@@ -27,6 +28,7 @@ def main():
                {"update_id": 2, "message": message(2, "2")}]
     counts = {"ai": 0, "memos": 0, "confirm": 0}
     failures = []
+    proxy_hosts = set()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -48,6 +50,11 @@ def main():
                 self.send_error(404)
 
         def do_POST(self):
+            destination = urlsplit(self.path)
+            if destination.scheme:
+                with lock:
+                    proxy_hosts.add(destination.hostname)
+                self.path = destination.path
             body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
             fields = {}
             if "multipart/form-data" in self.headers.get("Content-Type", ""):
@@ -113,8 +120,15 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix="memogram-notebook-") as tmp:
             config = Path(tmp) / "notebook.yaml"
-            config.write_text(sample.read_text().replace("http://host.docker.internal:8317/v1", base + "/v1"))
-            env = dict(os.environ, SERVER_ADDR=base, BOT_PROXY_ADDR=base, BOT_TOKEN="123:local-test",
+            ai_base = base + "/v1" if proxy_mode == "direct" else "http://ai.invalid/v1"
+            config_text = sample.read_text().replace("http://host.docker.internal:8317/v1", ai_base)
+            if proxy_mode == "separate":
+                config_text = config_text.replace("base_url: " + ai_base, "base_url: " + ai_base + "\n    proxy_url: " + base)
+            config.write_text(config_text)
+            shared_proxy = {"direct": "direct", "shared": base, "separate": "http://127.0.0.1:1"}[proxy_mode]
+            telegram_base = base if proxy_mode == "direct" else "http://telegram.invalid"
+            env = dict(os.environ, SERVER_ADDR=base, BOT_PROXY_ADDR=telegram_base, BOT_TOKEN="123:local-test",
+                       PROXY_URL=shared_proxy, TELEGRAM_PROXY_URL=base if proxy_mode == "separate" else "",
                        TELEGRAM_USER_ID="42", MEMOS_TOKEN="local-test", CLIPROXY_API_KEY="local-test",
                        DATA=str(Path(tmp) / "bindings.txt"), NOTEBOOK_CONFIG=str(config))
             process = subprocess.Popen([str(binary)], cwd=tmp, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -131,9 +145,12 @@ def main():
                     failures.append("process did not stop on SIGTERM")
             if counts != {"ai": 1, "memos": 1, "confirm": 1} or process.returncode != 0:
                 failures.append("unexpected counts/exit: " + str(counts) + "/" + str(process.returncode))
+            expected_hosts = set() if proxy_mode == "direct" else {"telegram.invalid", "ai.invalid"}
+            if proxy_hosts != expected_hosts:
+                failures.append("unexpected proxy destinations: " + str(proxy_hosts))
             if failures:
                 raise SystemExit("\n".join(failures) + "\n" + output)
-            print("PASS: real process startup -> local Telegram collection -> SDK draft -> duplicate confirmations -> one Memos save -> SIGTERM")
+            print("PASS [" + proxy_mode + "]: real process startup -> local Telegram collection -> SDK draft -> duplicate confirmations -> one Memos save -> SIGTERM")
             print("All services were local fakes; this is not real-service or Docker validation.")
     finally:
         server.shutdown()
@@ -141,4 +158,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    for proxy_mode in ("direct", "shared", "separate"):
+        main(proxy_mode)

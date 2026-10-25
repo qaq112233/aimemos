@@ -136,6 +136,9 @@ func (s *Service) Add(key string, m Material) (View, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.g == nil {
+		if len(m.Text) > s.cfg.MaxTextBytes {
+			return s.view(""), errors.New("素材已达配置上限，请先缩短素材")
+		}
 		s.key, s.g = key, &group{id: uuid.NewString()[:12], collecting: true}
 	}
 	if err := s.check(key, ""); err != nil {
@@ -302,7 +305,7 @@ func (s *Service) BeginSave(key, id string, version int, raw bool) (View, func(c
 	}
 	content, count := g.draft.Text, g.draft.Count
 	if raw {
-		content, count = Raw(g.materials), len(g.materials)
+		content, count = WithSources(Raw(g.materials), g.materials), len(g.materials)
 	} else {
 		content = WithSources(content, g.materials[:count])
 	}

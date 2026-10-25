@@ -38,6 +38,41 @@ docker compose -f compose.notebook.yaml logs -f
 
 Compose 只启动 Memogram，连接已经部署的 Memos。`localhost` 指容器本身；宿主机服务使用 `host.docker.internal`，其他 Compose 服务使用同网络的服务名。`notebook.yaml` 以只读方式挂载，密钥放 `.env`。上游构建脚本自动传递版本和提交元数据。配置修改后重启；仅修改 `.env` 时用 `up -d --force-recreate` 重新创建容器。
 
+## 网络代理
+
+在 `.env` 中设置统一代理和 Telegram 专用代理：
+
+```dotenv
+# Telegram 和所有未单独配置的 AI 供应商使用此代理。
+PROXY_URL=http://host.docker.internal:7890
+# 可选；留空继承统一代理，也可设置为 direct 强制直连。
+TELEGRAM_PROXY_URL=socks5://host.docker.internal:1080
+# 可选；供下方供应商的 proxy_env 引用，可包含代理认证信息。
+COMPATIBLE_PROXY_URL=socks5://user:password@host.docker.internal:1080
+```
+
+各 AI 供应商可在已有的 `providers` 配置下分别覆盖：
+
+```yaml
+providers:
+  cli_proxy:
+    # 保留原有 base_url、key_env、timeout 等设置。
+    proxy_url: direct
+  compatible:
+    # proxy_url 和 proxy_env 二选一。
+    proxy_env: COMPATIBLE_PROXY_URL
+    # 无需认证时也可直接配置：
+    # proxy_url: http://host.docker.internal:7890
+```
+
+优先级：Telegram 使用 `TELEGRAM_PROXY_URL` > `PROXY_URL`；每个 AI 供应商使用自己的 `proxy_url` 或 `proxy_env` > `PROXY_URL`。专用项留空时继承统一代理；任一层的 `direct` 表示强制直连。显式配置了 `proxy_env` 却未设置对应环境变量时，会报错并保留素材，不会静默改走其他连接。`--check-config` 校验 YAML 中的地址和字段冲突，但不要求环境变量已设置。
+
+支持 HTTP/HTTPS 代理及 SOCKS5，均可使用 `协议://用户名:密码@主机:端口`；用户名或密码里的 `@`、`:` 等特殊字符需按 URL 规则编码。SOCKS5 和 `socks5h` 都由代理解析目标域名。实现复用 [Go 标准 HTTP Transport](https://pkg.go.dev/net/http#Transport)，保留 TLS 证书验证，无额外依赖。
+
+Telegram 的初始化、长轮询、发送消息、文件查询及附件下载使用同一代理；图片送给 AI 前的下载仍使用 Telegram 的设置，AI 生成请求使用所选供应商的设置。`PROXY_URL` 不改变 Memos 的连接配置。未设置任何专用或统一代理时，保留原有 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 行为；显式代理和 `direct` 优先于这些系统变量，包含系统 `NO_PROXY` 中的地址。
+
+`BOT_PROXY_ADDR` 仍表示 Telegram API 服务地址，通常留空；实际 HTTP/SOCKS5 网络代理使用上述新字段。Docker 内的 `127.0.0.1` 指容器自身，宿主机代理请使用 `host.docker.internal`，并确认代理监听的地址允许容器连接。二进制直接运行时，可按实际情况改用 `127.0.0.1`。修改配置后重启；代理地址及密码不会写入 AI 输入或主动打印到日志。
+
 ## 交互和默认值
 
 连续发送或转发文字、网址、图片、相册及上游支持的文件，自动进入同一组。4 秒只是状态提示节流，不会自动分组、生成或保存；`/status` 随时显示准确计数和当前草稿。
@@ -68,6 +103,8 @@ Compose 只启动 Memogram，连接已经部署的 Memos。`localhost` 指容器
 
 参数优先级：模型默认值 < 方案覆盖 < 本次临时参数（应用接口已支持，未开发 Telegram 参数菜单）。每一层先转换普通参数，再合并本层 `extra`，同层同名扩展叶子优先；三层转换结果依次递归合并，高层普通参数也能覆盖低层扩展参数。扩展不能替换输入、模型、工具、认证或服务端会话状态。未配置的可选参数不会发送。
 
+固定配置和本次临时参数使用相同的保留字段校验，包含旧版函数调用字段。AI 请求只使用选定供应商的地址、Key 引用和显式请求头，不继承 SDK 自动读取的全局 `OPENAI_*` 设置；如需组织、项目或额外请求头，请在对应供应商的 `headers` 中配置。
+
 Responses 将上限映射到 `max_output_tokens`，思考等级到 `reasoning.effort`，详细程度到 `text.verbosity`。Chat Completions 默认 `max_completion_tokens`，可配置 `token_field: max_tokens`；思考等级和详细程度使用 `reasoning_effort` / `verbosity`。原生思考预算需同时配置模型的 `reasoning_budget_field`（例如 `thinking.budget_tokens`）和参数 `reasoning_budget`；这取决于实际中转支持，默认关闭。模型名带思考后缀时不能重复配置请求体思考参数。请求失败不自动重试或切换供应商。
 
 输出上限可能包括思考 Token。中断输出会标为不完整，不能确认保存；可以修改配置、切换模型或继续要求补全后重新生成。正文自动补上尚未出现的来源链接，不在末尾附全部原文。
@@ -86,6 +123,8 @@ python3 scripts/test-notebook.py ./build/memogram
 ```
 
 测试覆盖多条素材/相册、转发数字、访问限制、保存前零写入、原文顺序、两供应商两协议的请求、参数覆盖/省略、图片数据、截断输出、保留编辑上下文、生成快照、新素材保留、旧按钮、并发重复确认、正文失败和附件补传。已有上游测试保留。Python 冒烟脚本启动真正的本地二进制，通过三个本地模拟服务完成长轮询收集、SDK 生成、重复确认后仅保存一篇笔记以及 SIGTERM 退出；不使用真实凭据。
+
+代理测试使用本地 HTTP/SOCKS5 服务验证认证、远端域名解析、HTTPS CONNECT 与证书验证、请求取消、统一设置与专用覆盖、直连，以及 Telegram API/文件下载和两种 AI 协议的实际路由。
 
 本次没有真实 Telegram、AI 中转、Memos 凭据，也没有 Docker 守护进程。模拟测试和本地构建不能代表真实服务或容器启动通过。尚需在实际服务器验证：Telegram 长轮询与相册接收；中转模型/图片/扩展参数的实际支持；实际 Memos 版本、公开链接、标签提取和文件存储；Compose 构建启动及重启行为。首次联调请记录 Memos 的确切版本。
 

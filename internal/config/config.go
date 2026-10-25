@@ -11,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/usememos/memogram/internal/memos"
+	"github.com/usememos/memogram/internal/netproxy"
 )
 
 // DefaultDataPath is used when DATA is unset. Docker images set DATA to a path
@@ -24,6 +25,10 @@ type Config struct {
 	BotToken string
 	// BotProxyAddr optionally replaces the Telegram Bot API server (BOT_PROXY_ADDR).
 	BotProxyAddr string
+	// ProxyURL is the shared proxy for Telegram and AI providers (PROXY_URL).
+	ProxyURL string
+	// TelegramProxyURL overrides the shared proxy (TELEGRAM_PROXY_URL).
+	TelegramProxyURL string
 	// DataPath is the file that stores user bindings (DATA).
 	DataPath string
 	// AllowedUsernames lists lowercase Telegram usernames allowed to use the
@@ -47,6 +52,8 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 	cfg := &Config{
 		BotToken:         strings.TrimSpace(getenv("BOT_TOKEN")),
 		BotProxyAddr:     strings.TrimSpace(getenv("BOT_PROXY_ADDR")),
+		ProxyURL:         strings.TrimSpace(getenv("PROXY_URL")),
+		TelegramProxyURL: strings.TrimSpace(getenv("TELEGRAM_PROXY_URL")),
 		DataPath:         strings.TrimSpace(getenv("DATA")),
 		AllowedUsernames: parseUsernames(getenv("ALLOWED_USERNAMES")),
 	}
@@ -60,6 +67,15 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 	}
 	if cfg.BotToken == "" {
 		return nil, errors.New("BOT_TOKEN is required")
+	}
+	if _, err := netproxy.Parse(cfg.ProxyURL); err != nil {
+		return nil, fmt.Errorf("PROXY_URL: %w", err)
+	}
+	if cfg.TelegramProxyURL == "" {
+		cfg.TelegramProxyURL = cfg.ProxyURL
+	}
+	if _, err := netproxy.Parse(cfg.TelegramProxyURL); err != nil {
+		return nil, fmt.Errorf("TELEGRAM_PROXY_URL: %w", err)
 	}
 	if cfg.DataPath == "" {
 		cfg.DataPath = DefaultDataPath

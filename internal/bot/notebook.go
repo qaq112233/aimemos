@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -235,7 +237,53 @@ func (s *Service) showNotebook(ctx context.Context, chatID int64, v workflow.Vie
 	s.send(ctx, &bot.SendMessageParams{ChatID: chatID, Text: strings.TrimSpace(text), ReplyMarkup: &models.InlineKeyboardMarkup{InlineKeyboard: rows}})
 }
 
-var sourceURL = regexp.MustCompile(`https?://[^\s<>\[\]()]+`)
+var sourceURL = regexp.MustCompile(`https?://[^\s<>]+`)
+
+func sourceLinks(text string, entities []models.MessageEntity) []string {
+	var links []string
+	add := func(link string) {
+		if u, err := url.Parse(link); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && !slices.Contains(links, link) {
+			links = append(links, link)
+		}
+	}
+	// Telegram's URL spans are authoritative and count UTF-16 units. Mask them
+	// before fallback extraction to avoid also adding a shortened duplicate.
+	units := utf16.Encode([]rune(text))
+	uncovered := slices.Clone(units)
+	for _, entity := range entities {
+		if entity.Type != models.MessageEntityTypeURL || entity.Offset < 0 || entity.Length <= 0 || entity.Offset > len(units) || entity.Length > len(units)-entity.Offset {
+			continue
+		}
+		end := entity.Offset + entity.Length
+		add(string(utf16.Decode(units[entity.Offset:end])))
+		for i := entity.Offset; i < end; i++ {
+			uncovered[i] = ' '
+		}
+	}
+	for _, link := range sourceURL.FindAllString(string(utf16.Decode(uncovered)), -1) {
+		link = strings.TrimRight(link, ".,;!?，。；！？\"'”’")
+		// Remove surrounding prose/Markdown delimiters while retaining balanced
+		// parentheses and IPv6 brackets within the URL itself.
+		for len(link) > 0 {
+			last := link[len(link)-1]
+			open := byte(0)
+			switch last {
+			case ')':
+				open = '('
+			case ']':
+				open = '['
+			case '}':
+				open = '{'
+			}
+			if open == 0 || strings.Count(link, string(last)) <= strings.Count(link, string(open)) {
+				break
+			}
+			link = link[:len(link)-1]
+		}
+		add(link)
+	}
+	return links
+}
 
 func notebookMaterial(m *models.Message) (workflow.Material, bool) {
 	// Reuse upstream forwarding/attachment helpers, preserving original text
@@ -245,14 +293,13 @@ func notebookMaterial(m *models.Message) (workflow.Material, bool) {
 	if m.Caption != "" {
 		text, entities = m.Caption, m.CaptionEntities
 	}
-	var sources []string
-	for _, link := range sourceURL.FindAllString(text, -1) {
-		sources = append(sources, strings.TrimRight(link, ".,;，。；"))
-	}
+	sources := sourceLinks(text, entities)
 	for _, entity := range entities {
 		if entity.Type == models.MessageEntityTypeTextLink {
 			if u, err := url.Parse(entity.URL); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {
-				sources = append(sources, entity.URL)
+				if !slices.Contains(sources, entity.URL) {
+					sources = append(sources, entity.URL)
+				}
 				if !strings.Contains(text, entity.URL) {
 					text += "\n" + entity.URL
 				}
@@ -261,7 +308,7 @@ func notebookMaterial(m *models.Message) (workflow.Material, bool) {
 	}
 	if m.ForwardOrigin != nil {
 		text = forwardHeader(m.ForwardOrigin) + "\n" + text
-		sources = append(sources, sourceURL.FindAllString(forwardHeader(m.ForwardOrigin), -1)...)
+		sources = append(sources, sourceLinks(forwardHeader(m.ForwardOrigin), nil)...)
 		if ch := m.ForwardOrigin.MessageOriginChannel; ch != nil && ch.Chat.Username != "" {
 			link := fmt.Sprintf("https://t.me/%s/%d", ch.Chat.Username, ch.MessageID)
 			sources = append(sources, link)
@@ -294,11 +341,11 @@ type notebookDestination struct{ s *Service }
 func (d notebookDestination) Create(ctx context.Context, content string) (workflow.Memo, error) {
 	memo, err := d.s.memos.WithAccessToken(d.s.notebookCfg.MemosToken).CreateMemo(ctx, memosapi.Memo{Content: content})
 	if err != nil {
-		return workflow.Memo{}, fmt.Errorf("请检查 Memos 连接和访问令牌")
+		return workflow.Memo{}, errors.New("请检查 Memos 连接和访问令牌")
 	}
 	id, err := memos.MemoUID(memo.Name)
 	if err != nil {
-		return workflow.Memo{}, fmt.Errorf("Memos 返回了无效笔记标识")
+		return workflow.Memo{}, errors.New("返回了无效的 Memos 笔记标识")
 	}
 	return workflow.Memo{Name: memo.Name, URL: d.s.linkBase + "/memos/" + id}, nil
 }
