@@ -99,7 +99,7 @@ docker rm memogram
 
 ## 使用发布的二进制
 
-从本仓库 [Releases](https://github.com/qaq112233/aimemos/releases) 下载对应操作系统与 CPU 架构的压缩包，解压后按上述步骤准备 `.env` 和 `notebook.yaml`：
+本项目仅支持 **Linux amd64、arm64**，后续发布只提供这两种架构的压缩包和 Docker 镜像。从本仓库 [Releases](https://github.com/qaq112233/aimemos/releases) 下载对应 Linux 架构的压缩包，解压后按上述步骤准备 `.env` 和 `notebook.yaml`：
 
 ```sh
 ./memogram --version

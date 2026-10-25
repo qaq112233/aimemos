@@ -2,6 +2,8 @@
 
 ## 本地构建
 
+发布目标固定为 `linux/amd64` 和 `linux/arm64`，二进制压缩包和 Docker 镜像均遵循此范围。
+
 需要 Go 1.27.2 或更高版本。CI 从 `go.mod` 读取工具链版本，Docker 构建版本与其保持一致。静态检查使用 golangci-lint 2.15.0。
 
 ```sh
@@ -103,7 +105,7 @@ goreleaser check
 python3 scripts/test-release.py
 ```
 
-脚本在临时克隆中打包稳定版、候选版和历史日期版本，检查本机压缩包中的二进制版本；不会发布或修改原仓库标签。跨系统编译会占用较多资源，建议交给 GitHub Actions。本地脚本按单个目标顺序打包，默认 `GOMAXPROCS=2`、`GOFLAGS=-p=2`；不要在资源受限的 WSL 中同时运行多个构建和静态检查。
+脚本在临时克隆中打包稳定版、候选版和历史日期版本，检查本机压缩包中的二进制版本；不会发布或修改原仓库标签。跨架构编译会占用较多资源，建议交给 GitHub Actions。本地脚本按单个目标顺序打包，默认 `GOMAXPROCS=2`、`GOFLAGS=-p=2`；不要在资源受限的 WSL 中同时运行多个构建和静态检查。
 
 直接构建 Docker 时必须提供 `VERSION=0.2.0` 和 `COMMIT=<源码提交号>`，因为 Docker 上下文不包含 `.git`。
 

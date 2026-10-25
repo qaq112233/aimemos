@@ -14,8 +14,9 @@ builds:
       - -s -w -X github.com/usememos/memogram/internal/version.Version={{ .Version }} -X github.com/usememos/memogram/internal/version.Commit={{ .FullCommit }}
     goos:
       - linux
-      - darwin
-      - windows
+    goarch:
+      - amd64
+      - arm64
 
 archives:
   - formats: [tar.gz]

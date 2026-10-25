@@ -44,7 +44,7 @@ def main():
         run("git", "commit", "--quiet", "--allow-empty", "-m", "test: verify release packaging", cwd=repo)
         commit = run("git", "rev-parse", "HEAD", cwd=repo)
         previous = run("bash", "scripts/release_version.sh", "previous-tag", ".", cwd=repo)
-        goos = platform.system().lower()
+        goos = "linux"
         goarch = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "amd64", "amd64": "amd64"}[platform.machine().lower()]
         for tag in ["v0.2.0", "v0.2.0-rc.1", "26.01.0"]:
             run("git", "tag", "--force", tag, cwd=repo)
@@ -52,15 +52,15 @@ def main():
             env = os.environ.copy()
             for key in ["GITHUB_TOKEN", "GH_TOKEN", "GITLAB_TOKEN", "GITEA_TOKEN"]:
                 env.pop(key, None)
-            # Cross-compilers for several operating systems can exhaust WSL
-            # memory and cause swapping. Keep local dry runs sequential.
+            # Keep architecture builds sequential to limit local memory use.
             env.setdefault("GOMAXPROCS", "2")
             env.setdefault("GOFLAGS", "-p=2")
             env.update(GORELEASER_CURRENT_TAG=tag, GORELEASER_PREVIOUS_TAG=previous)
             run(executable, "release", "--clean", "--parallelism=1", "--skip=publish,announce", cwd=repo, env=env)
             archives = list((repo / "dist").glob("memogram_" + tag + "_*.tar.gz"))
-            if not archives:
-                raise RuntimeError("missing archives for " + tag)
+            expected_archives = {"memogram_" + tag + "_linux_" + arch + ".tar.gz" for arch in ["amd64", "arm64"]}
+            if {archive.name for archive in archives} != expected_archives:
+                raise RuntimeError("expected only Linux amd64/arm64 archives for " + tag)
             native = repo / "dist" / ("memogram_" + tag + "_" + goos + "_" + goarch + ".tar.gz")
             binary = Path(temp) / "memogram"
             with tarfile.open(native) as archive:
