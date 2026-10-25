@@ -4,7 +4,8 @@ cd "$(dirname "$0")/../"
 
 # Development versions come from HEAD, not the clock of the build machine.
 if [ -n "${MEMOGRAM_VERSION:-}" ]; then
-  bash scripts/release_version.sh version "$MEMOGRAM_VERSION" >/dev/null
+  release_metadata=$(bash scripts/release_version.sh version "$MEMOGRAM_VERSION")
+  MEMOGRAM_VERSION=$(printf '%s\n' "$release_metadata" | sed -n 's/^version=//p')
 else
   MEMOGRAM_VERSION=$(bash scripts/release_version.sh development-version)
 fi

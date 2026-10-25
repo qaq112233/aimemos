@@ -1,42 +1,163 @@
-name: Build artifacts
+name: Build and publish
 
 on:
-  push:
-    tags:
-      - "[1-9][0-9].*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to use for this manual build
+        required: true
+        default: v0.1.0
+        type: string
+  release:
+    types: [published]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name || inputs.version }}
+  cancel-in-progress: false
 
 jobs:
-  goreleaser:
+  build:
     runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+      commit: ${{ steps.version.outputs.commit }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Validate calendar release tag
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: bash scripts/release_version.sh version "$RELEASE_TAG"
-      - name: Find previous stable release
-        run: echo "GORELEASER_PREVIOUS_TAG=$(bash scripts/release_version.sh previous-tag .)" >> "$GITHUB_ENV"
+          ref: ${{ github.event.release.tag_name || github.ref }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           check-latest: true
           cache: true
+      - name: Validate version and prepare build tag
+        id: version
+        env:
+          REQUESTED_TAG: ${{ github.event.release.tag_name || inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          metadata="$(bash scripts/release_version.sh version "$REQUESTED_TAG")"
+          version="$(printf '%s\n' "$metadata" | sed -n 's/^version=//p')"
+          if [ -z "$version" ]; then
+            echo "Could not resolve version from $REQUESTED_TAG" >&2
+            exit 1
+          fi
+
+          # This tag exists only in the runner. Manual builds use the selected
+          # ref even when an inherited upstream tag has the same version.
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            git -c tag.gpgsign=false tag --force "$REQUESTED_TAG"
+          fi
+          echo "$metadata" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Find previous stable release
+        run: |
+          previous_tag="$(bash scripts/release_version.sh previous-tag .)"
+          if [ -n "$previous_tag" ]; then
+            echo "GORELEASER_PREVIOUS_TAG=$previous_tag" >> "$GITHUB_ENV"
+          fi
       - name: Test
         run: go test ./...
       - name: Vet
         run: go vet ./...
-      - name: Run GoReleaser
+      - name: Package release archives
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: v2.18.3
-          args: release --clean
+          args: release --clean --skip=publish,announce
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          GORELEASER_CURRENT_TAG: ${{ steps.version.outputs.tag }}
+      - name: Save build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: aimemos-${{ steps.version.outputs.tag }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release-assets:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@v8
+        with:
+          name: aimemos-${{ needs.build.outputs.release_tag }}
+          path: dist
+      - name: Attach archives to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+        run: gh release upload "$RELEASE_TAG" dist/*.tar.gz --clobber
+
+  publish-image:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.build.outputs.commit }}
+      - name: Prepare image tags
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+          IS_PRERELEASE: ${{ needs.build.outputs.is_prerelease }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          image="ghcr.io/${REPOSITORY,,}"
+          {
+            echo 'tags<<EOF'
+            echo "$image:$RELEASE_TAG"
+            if [ "$VERSION" != "$RELEASE_TAG" ]; then
+              echo "$image:$VERSION"
+            fi
+            if [ "$EVENT_NAME" = release ] && [ "$IS_PRERELEASE" = false ] && [ "$RELEASE_PRERELEASE" = false ]; then
+              echo "$image:latest"
+            fi
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.image.outputs.tags }}
+          build-args: |
+            VERSION=${{ needs.build.outputs.version }}
+            COMMIT=${{ needs.build.outputs.commit }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.build.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.build.outputs.commit }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

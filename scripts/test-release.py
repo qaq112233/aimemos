@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package CalVer releases in an isolated clone, without publishing anything."""
+"""Package SemVer and legacy CalVer releases in an isolated clone, without publishing anything."""
 import os
 from pathlib import Path
 import platform
@@ -41,12 +41,12 @@ def main():
             run("git", "config", key, value, cwd=repo)
         run("git", "remote", "set-url", "origin", run("git", "remote", "get-url", "origin", cwd=root), cwd=repo)
         run("git", "add", "--all", cwd=repo)
-        run("git", "commit", "--quiet", "--allow-empty", "-m", "test: verify CalVer release packaging", cwd=repo)
+        run("git", "commit", "--quiet", "--allow-empty", "-m", "test: verify release packaging", cwd=repo)
         commit = run("git", "rev-parse", "HEAD", cwd=repo)
         previous = run("bash", "scripts/release_version.sh", "previous-tag", ".", cwd=repo)
         goos = platform.system().lower()
         goarch = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "amd64", "amd64": "amd64"}[platform.machine().lower()]
-        for tag in ["26.10.0", "26.10.0-rc.1", "26.01.0"]:
+        for tag in ["v0.1.0", "v0.1.0-rc.1", "26.01.0"]:
             run("git", "tag", "--force", tag, cwd=repo)
             run("bash", "scripts/release_version.sh", "version", tag, cwd=repo)
             env = os.environ.copy()
@@ -64,7 +64,7 @@ def main():
                 binary.write_bytes(archive.extractfile(member).read())
             binary.chmod(0o700)
             actual = run(str(binary), "--version", cwd=repo)
-            if actual != "memogram " + tag + " (commit " + commit + ")":
+            if actual != "memogram " + tag.removeprefix("v") + " (commit " + commit + ")":
                 raise RuntimeError("archive version mismatch: " + actual)
             print("Release dry run passed: " + tag + ", " + str(len(archives)) + " archives; previous stable " + previous, flush=True)
 

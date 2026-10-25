@@ -11,7 +11,8 @@ import (
 var Version string
 var Commit = "unknown"
 
-var buildVersion = regexp.MustCompile(`^[1-9][0-9]\.(0[1-9]|1[0-2])\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*|-dev\.[0-9a-f]{7})?$`)
+var semverBuildVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*|-dev\.[0-9a-f]{7})?$`)
+var calverBuildVersion = regexp.MustCompile(`^[1-9][0-9]\.(0[1-9]|1[0-2])\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*|-dev\.[0-9a-f]{7})?$`)
 
 func init() {
 	if info, ok := debug.ReadBuildInfo(); ok {
@@ -41,8 +42,8 @@ func resolveBuild(version, commit string, settings []debug.BuildSetting) (string
 }
 
 func Validate() error {
-	if !buildVersion.MatchString(Version) {
-		return fmt.Errorf("invalid build version %q: build with scripts/build.sh or inject internal/version.Version as YY.MM.N[-rc.K] or YY.MM.D-dev.<sha7>", Version)
+	if !semverBuildVersion.MatchString(Version) && !calverBuildVersion.MatchString(Version) {
+		return fmt.Errorf("invalid build version %q: build with scripts/build.sh or inject internal/version.Version as MAJOR.MINOR.PATCH[-rc.K] or YY.MM.D-dev.<sha7>", Version)
 	}
 	return nil
 }

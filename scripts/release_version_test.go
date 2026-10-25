@@ -25,21 +25,22 @@ func releaseCommand(args ...string) *exec.Cmd {
 
 func TestReleaseTags(t *testing.T) {
 	requireTools(t)
-	for _, tag := range []string{"26.10.0", "26.10.1", "26.01.0", "27.12.0", "26.10.0-rc.1", "26.10.2-rc.12"} {
+	for _, tag := range []string{"v0.1.0", "v0.1.0-rc.1", "v1.2.3", "26.10.0", "26.10.1", "26.01.0", "27.12.0", "26.10.0-rc.1", "26.10.2-rc.12"} {
 		t.Run(tag, func(t *testing.T) {
 			output, err := releaseCommand("version", tag).CombinedOutput()
 			if err != nil {
 				t.Fatalf("version: %v\n%s", err, output)
 			}
-			parts := strings.Split(tag, ".")
-			want := "tag=" + tag + "\nversion=" + tag + "\nseries=" + parts[0] + "." + parts[1] + "\nis_prerelease="
+			version := strings.TrimPrefix(tag, "v")
+			parts := strings.Split(version, ".")
+			want := "tag=" + tag + "\nversion=" + version + "\nseries=" + parts[0] + "." + parts[1] + "\nis_prerelease="
 			want += map[bool]string{true: "true", false: "false"}[strings.Contains(tag, "-rc.")] + "\n"
 			if string(output) != want {
 				t.Fatalf("got %q, want %q", output, want)
 			}
 		})
 	}
-	for _, tag := range []string{"", "v0.5.0", "v26.10.0", "26.10", "26.1.0", "26.00.0", "26.13.0", "26.10.01", "26.10.0-rc.0", "26.10.0-rc.01", "26.10.1-dev.abcdef0", "26.10.0-beta.1", "26.10.0\n"} {
+	for _, tag := range []string{"", "v0.01.0", "v0.1.0-rc.0", "26.10", "26.1.0", "26.00.0", "26.13.0", "26.10.01", "26.10.0-rc.0", "26.10.0-rc.01", "26.10.1-dev.abcdef0", "26.10.0-beta.1", "26.10.0\n"} {
 		if output, err := releaseCommand("version", tag).CombinedOutput(); err == nil {
 			t.Errorf("accepted invalid release tag %q: %s", tag, output)
 		}

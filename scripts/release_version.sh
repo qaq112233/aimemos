@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Release tags are YY.MM.N[-rc.K], without a v prefix. N starts at 0, K at 1.
+# Release tags are SemVer vMAJOR.MINOR.PATCH[-rc.K]. Legacy YY.MM.N[-rc.K]
+# tags remain accepted for builds from the upstream history.
 parse_release_tag() {
   local tag="$1"
+  if [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.([1-9][0-9]*))?$ ]]; then
+    RELEASE_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}${BASH_REMATCH[4]}"
+    RELEASE_SERIES="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+    RELEASE_IS_PRERELEASE=false
+    if [[ -n "${BASH_REMATCH[5]}" ]]; then
+      RELEASE_IS_PRERELEASE=true
+    fi
+    return 0
+  fi
+
   if [[ ! "$tag" =~ ^([1-9][0-9]\.(0[1-9]|1[0-2]))\.(0|[1-9][0-9]*)(-rc\.([1-9][0-9]*))?$ ]]; then
     return 1
   fi
@@ -42,10 +53,8 @@ previous_release_tag() {
     fi
   done < <(
     git -C "$repo" tag --list '[1-9][0-9].*' --sort=-version:refname
-    git -C "$repo" tag --list 'v0.*' --sort=-version:refname
+    git -C "$repo" tag --list 'v[0-9]*' --sort=-version:refname
   )
-  echo 'No previous stable release found' >&2
-  return 1
 }
 
 case "${1:-}" in
@@ -57,7 +66,7 @@ case "${1:-}" in
       exit 1
     fi
     printf 'tag=%s\nversion=%s\nseries=%s\nis_prerelease=%s\n' \
-      "$RELEASE_VERSION" "$RELEASE_VERSION" "$RELEASE_SERIES" "$RELEASE_IS_PRERELEASE"
+      "$2" "$RELEASE_VERSION" "$RELEASE_SERIES" "$RELEASE_IS_PRERELEASE"
     ;;
   *) echo "Usage: $0 {version TAG|development-version [REPO]|previous-tag [REPO]}" >&2; exit 1 ;;
 esac

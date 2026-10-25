@@ -175,24 +175,37 @@ python3 scripts/test-container.py memogram
 
 ## Versioning and releases
 
-The first CalVer release is **26.10.0**, following the historical `v0.5.0` release. Memogram releases are numbered independently of the Memos versions they support.
+This fork starts at **v0.1.0**, independently of upstream and Memos versions.
 
-- Stable tags: `YY.MM.N`, such as `26.10.0` and `26.10.1`. Each month's sequence starts at `.0`.
-- Release candidates: `YY.MM.N-rc.K`, such as `26.10.0-rc.1`. Candidate numbers start at 1.
-- Development builds: `YY.MM.D-dev.<sha7>`, derived from HEAD's committer date in UTC and commit SHA, such as `26.10.15-dev.abcdef0`.
+- Stable release tags: `v0.1.0`, `v0.1.1`, and so on.
+- Release candidates: `v0.1.0-rc.1` (also mark the GitHub Release as a prerelease).
+- Binaries print the version without `v`, plus the source commit. Development builds retain `YY.MM.D-dev.<sha7>` metadata. Legacy upstream CalVer tags remain supported.
 
-New release tags have no `v` prefix, and months are always two digits. Bare month names such as `26.10` are not release tags. Historical `v0.x` releases remain available.
+### GitHub Actions
 
-`--version` prints the version and commit without loading configuration or contacting Telegram. Startup logs include the same metadata. Release builds inject the exact tag; ordinary Go package builds derive development metadata from Git. For `go run`, use `go run -buildvcs=true ./cmd/memogram --version`.
+`Build and publish` runs only from **Actions → Run workflow** or when a GitHub Release is **published** (saving a draft does not trigger it). Commits and tag pushes do not trigger publishing. CI runs on pushes to `main`, pull requests, or manually.
 
-The build script supplies metadata for binary, Docker, and Compose builds. Docker's context excludes `.git`, so direct Docker builds must provide `--build-arg VERSION=... --build-arg COMMIT=...`. To build the first release locally without creating a Git tag or publishing:
+1. Manual: select the branch/tag to build and enter a version (default `v0.1.0`). Download the Linux, macOS and Windows archives from the run's artifacts (retained for 14 days). The workflow also pushes the Docker image. It does not create a GitHub Release or change remote Git tags.
+2. Release: create and publish a Release in this fork with tag `v0.1.0`. The workflow builds that tag's code and attaches the archives to that same Release, preserving its title and notes. Use a tag pointing to the desired fork commit; inherited upstream tags can point to older code.
+
+Images are published to `ghcr.io/<owner>/<repository>`; for this repository:
 
 ```sh
-MEMOGRAM_VERSION=26.10.0 sh scripts/build.sh
-MEMOGRAM_VERSION=26.10.0 sh scripts/build.sh docker -t memogram:26.10.0
-./build/memogram --version
+docker pull ghcr.io/qaq112233/aimemos:v0.1.0
 ```
 
-The tag-triggered workflow validates the release format, tests the code, and uses GoReleaser 2.18.3 to build release archives. GitHub releases remain drafts, with candidates marked as prereleases. Changelogs compare against the previous stable ancestor, falling back to the legacy `v0.x` history for the first CalVer release. API support remains latest plus the two most recent stable Memos series; changing Memogram's release format does not change that matrix.
+Images support `linux/amd64` and `linux/arm64`. Each run publishes both `v0.1.0` and `0.1.0` tags (or the requested version). Only a stable published Release updates `latest`; manual builds and prereleases do not. Reusing a version replaces its image tags; use a new version for each release.
 
-CI also runs `python3 scripts/test-release.py` with GoReleaser 2.18.3. It packages `26.10.0`, `26.10.0-rc.1`, and `26.01.0` in a temporary clone, checks the native archived binary's version, and skips publishing and announcements. The test creates tags only in the disposable clone.
+Publishing uses the built-in `GITHUB_TOKEN` with `contents: write` for Release attachments and `packages: write` for GHCR; no separate registry secret is required. For anonymous pulls, set the GHCR package visibility to public after its first publication.
+
+### Local verification
+
+```sh
+MEMOGRAM_VERSION=v0.1.0 sh scripts/build.sh
+./build/memogram --version
+MEMOGRAM_VERSION=v0.1.0 sh scripts/build.sh docker -t memogram:v0.1.0
+```
+
+Direct Docker builds must supply `VERSION=0.1.0` and `COMMIT=<source SHA>` as build arguments. The Docker context excludes `.git`.
+
+`python3 scripts/test-release.py` uses GoReleaser 2.18.3 in a temporary clone to package stable, candidate and legacy releases, then verifies the native archived binary's version. It neither publishes nor modifies the working repository's tags.
