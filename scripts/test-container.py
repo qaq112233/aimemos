@@ -12,7 +12,7 @@ import uuid
 
 
 def docker(*args):
-    return subprocess.check_output(["docker", *args], text=True).strip()
+    return subprocess.check_output(["docker", *args], text=True, stderr=subprocess.STDOUT).strip()
 
 
 class MockAPI(http.server.BaseHTTPRequestHandler):
@@ -41,6 +41,13 @@ class MockAPI(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self.respond(self.read_body())
 
+    def form(self, body):
+        message = email.parser.BytesParser(policy=email.policy.default).parsebytes(
+            ("Content-Type: " + self.headers["Content-Type"] + "\r\n\r\n").encode() + body
+        )
+        return {part.get_param("name", header="content-disposition"): part.get_payload(decode=True).decode()
+                for part in message.iter_parts()}
+
     def respond(self, body):
         if self.path == "/api/instance/profile":
             result = {"version": "container-smoke"}
@@ -51,18 +58,18 @@ class MockAPI(http.server.BaseHTTPRequestHandler):
         elif self.path.endswith("/getMe"):
             result = {"ok": True, "result": {"id": 123, "is_bot": True, "first_name": "Test", "username": "memogram_test"}}
         elif self.path.endswith("/getUpdates"):
+            offset = int(self.form(body).get("offset", 0))
             with self.condition:
-                self.condition.wait(timeout=0.1)
+                # Telegram acknowledges updates only when the next poll's
+                # offset advances past them. A disconnected old container's
+                # poll must not consume the new container's pending update.
+                self.updates[:] = [update for update in self.updates if update["update_id"] >= offset]
+                self.condition.wait_for(lambda: bool(self.updates), timeout=0.1)
                 result = {"ok": True, "result": self.updates[:]}
-                self.updates.clear()
         elif self.path.endswith("/setMyCommands"):
             result = {"ok": True, "result": True}
         elif self.path.endswith("/sendMessage"):
-            message = email.parser.BytesParser(policy=email.policy.default).parsebytes(
-                ("Content-Type: " + self.headers["Content-Type"] + "\r\n\r\n").encode() + body
-            )
-            text = next(part.get_payload(decode=True).decode() for part in message.iter_parts()
-                        if part.get_param("name", header="content-disposition") == "text")
+            text = self.form(body)["text"]
             with self.condition:
                 self.replies.append(text)
                 self.condition.notify_all()
@@ -71,17 +78,23 @@ class MockAPI(http.server.BaseHTTPRequestHandler):
             self.send_error(404)
             return
         payload = json.dumps(result).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            # Stopping a container cancels its in-flight long poll.
+            pass
 
 
 def main():
     image = sys.argv[1]
     metadata = docker("run", "--rm", image, "--version")
-    if not re.fullmatch(r"memogram [1-9][0-9]\.(0[1-9]|1[0-2])\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*|-dev\.[0-9a-f]{7})? \(commit [0-9a-f]{40}\)", metadata):
+    semver = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    calver = r"[1-9][0-9]\.(0[1-9]|1[0-2])\.(0|[1-9][0-9]*)"
+    if not re.fullmatch(rf"memogram ({semver}|{calver})(-rc\.[1-9][0-9]*|-dev\.[0-9a-f]{{7}})? \(commit [0-9a-f]{{40}}\)", metadata):
         raise RuntimeError("invalid container version metadata: " + metadata)
     if len(sys.argv) > 2 and not metadata.startswith("memogram " + sys.argv[2] + " "):
         raise RuntimeError("unexpected container version: " + metadata)
@@ -110,10 +123,10 @@ def main():
             with MockAPI.condition:
                 ok = MockAPI.condition.wait_for(lambda: any(expected in reply for reply in MockAPI.replies), timeout=30)
             if not ok:
-                raise RuntimeError("container smoke failed:\n" + docker("logs", name))
+                raise RuntimeError(f"container smoke failed waiting for {expected!r}; replies={MockAPI.replies!r}:\n" + docker("logs", name))
             docker("stop", "--time", "5", name)
             docker("rm", name)
-        print("Container smoke passed: CalVer metadata, non-root startup, token binding, recreation, saved memo.")
+        print("Container smoke passed: version metadata, non-root startup, token binding, recreation, saved memo.")
     finally:
         subprocess.run(["docker", "rm", "-f", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         docker("volume", "rm", volume)

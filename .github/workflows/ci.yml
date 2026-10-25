@@ -88,5 +88,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - run: python3 -m unittest discover -s scripts -p 'test_container_*.py' -v
       - run: sh scripts/build.sh docker -t memogram:ci
       - run: python3 scripts/test-container.py memogram:ci

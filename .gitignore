@@ -6,3 +6,4 @@ dist/
 data.txt
 data/
 notebook.yaml
+__pycache__/
