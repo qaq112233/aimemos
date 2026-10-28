@@ -1,6 +1,6 @@
 # AIMemos / Memogram
 
-通过 Telegram 收集文字、网址、图片和文件，交给 AI 整理成 Markdown 草稿，确认后保存到 Memos。当前版本 **v0.3.0**，支持多图理解、草稿修改、多供应商和两种 AI 协议。
+通过 Telegram 收集文字、网址、图片和文件，交给 AI 整理成 Markdown 草稿，确认后保存到 Memos。当前版本 **v0.3.2**，支持多图理解、草稿修改、多供应商、两种 AI 协议和 Memos 的 Cloudflare Access 认证。
 
 项目基于 [usememos/telegram-integration](https://github.com/usememos/telegram-integration)，保留上游历史与即时保存模式；程序和发布文件仍使用 `memogram` 名称。
 
@@ -71,7 +71,7 @@ chmod 600 .env
 ## 使用发布的 Docker 镜像
 
 ```sh
-docker pull ghcr.io/qaq112233/aimemos:v0.3.0
+docker pull ghcr.io/qaq112233/aimemos:v0.3.2
 docker volume create memogram-data
 docker run -d --name memogram --restart unless-stopped \
   --env-file .env \
@@ -81,7 +81,7 @@ docker run -d --name memogram --restart unless-stopped \
   -p 127.0.0.1:8080:8080 \
   -v memogram-data:/data \
   -v "$PWD/notebook.yaml:/app/notebook.yaml:ro" \
-  ghcr.io/qaq112233/aimemos:v0.3.0
+  ghcr.io/qaq112233/aimemos:v0.3.2
 docker logs -f memogram
 ```
 
@@ -92,7 +92,7 @@ docker logs -f memogram
 更新镜像时保留 `.env`、`notebook.yaml` 和数据卷：
 
 ```sh
-docker pull ghcr.io/qaq112233/aimemos:v0.3.0
+docker pull ghcr.io/qaq112233/aimemos:v0.3.2
 docker stop memogram
 docker rm memogram
 # 使用上面的 docker run 命令重新创建容器，复用原有数据卷。
@@ -135,6 +135,7 @@ AI 笔记模式中，连续发送的素材留在同一组；四秒状态提示�
 | 变量 | 用途 |
 | --- | --- |
 | `SERVER_ADDR` | 必填，Memos 地址，例如 `https://memos.example.com` |
+| `MEMOS_CF_ACCESS_CLIENT_ID`、`MEMOS_CF_ACCESS_CLIENT_SECRET` | 可选，Memos 的 Cloudflare Access Service Token，必须成对填写；仅发送到 Memos，不替代 Memos 自身令牌 |
 | `BOT_TOKEN` | 必填，Telegram Bot Token |
 | `ALLOWED_USERNAMES` | 允许的用户名列表，与下面的 ID 名单至少填写一项 |
 | `ALLOWED_USER_IDS` | 允许的正整数用户 ID 列表，逗号分隔 |
@@ -148,6 +149,8 @@ AI 笔记模式中，连续发送的素材留在同一组；四秒状态提示�
 | `TELEGRAM_PROXY_URL` | Telegram API 和文件下载的专用网络代理 |
 | `BOT_PROXY_ADDR` | Telegram Bot API 服务地址，通常留空，不是 HTTP/SOCKS5 代理 |
 | `DATA` | 绑定文件路径；二进制默认 `data.txt`，容器默认 `/data/data.txt` |
+
+Memos 受 Cloudflare Access 保护时，在对应应用中配置 **Service Auth** 策略，Include 选择使用的 Service Token，并将其 ID 和 Secret 填入上面的 `MEMOS_CF_ACCESS_*` 变量。程序会同时携带 Cloudflare 的两个认证请求头和 Memos 自身的令牌；Telegram 和 AI 请求不携带这些 Cloudflare 凭据。
 
 代理支持 HTTP、HTTPS、SOCKS5 和 `socks5h`，可包含用户名和密码。`direct` 强制直连；专用项留空时继承统一代理。所有层都未指定时，沿用 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`。供应商专用代理见[笔记模式配置](README_NOTEBOOK.md#网络代理)。
 

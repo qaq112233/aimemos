@@ -20,6 +20,9 @@ func TestMemosClientAPINamespace(t *testing.T) {
 			var paths []string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				paths = append(paths, r.URL.Path)
+				if r.Header.Get("CF-Access-Client-Id") != "test-id.access" || r.Header.Get("CF-Access-Client-Secret") != "test-secret" {
+					t.Error("missing Cloudflare Access service token")
+				}
 				if !strings.HasPrefix(r.URL.Path, "/"+namespace+"/") {
 					http.NotFound(w, r)
 					return
@@ -61,7 +64,7 @@ func TestMemosClientAPINamespace(t *testing.T) {
 			if strings.HasPrefix(namespace, "notes/") {
 				baseURL += "/notes"
 			}
-			client := NewClient(baseURL)
+			client := NewClient(baseURL).WithServiceToken("test-id.access", "test-secret")
 			// An authenticated client created before discovery must share the selection.
 			auth := client.WithAccessToken("test-token")
 			profile, err := client.GetInstanceProfile(context.Background())
@@ -106,6 +109,9 @@ func TestMemosClientProfileFallback(t *testing.T) {
 			var paths []string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				paths = append(paths, r.URL.Path)
+				if r.Header.Get("CF-Access-Client-Id") != "" || r.Header.Get("CF-Access-Client-Secret") != "" {
+					t.Error("unexpected Cloudflare Access credentials without configuration")
+				}
 				w.Header().Set("Content-Type", "application/json")
 				if r.URL.Path == "/api/v1/instance/profile" {
 					fmt.Fprint(w, `{"version":"legacy"}`)
@@ -126,6 +132,45 @@ func TestMemosClientProfileFallback(t *testing.T) {
 				if !errors.As(err, &apiErr) || apiErr.StatusCode != status || len(paths) != 1 {
 					t.Fatalf("error unexpectedly retried: paths=%v err=%v", paths, err)
 				}
+			}
+		})
+	}
+}
+
+func TestMemosCredentialsStayAtOriginOnRedirect(t *testing.T) {
+	for _, sameOrigin := range []bool{true, false} {
+		t.Run(fmt.Sprint(sameOrigin), func(t *testing.T) {
+			destination := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				for header, expected := range map[string]string{
+					"Authorization": "Bearer memos-token", "CF-Access-Client-Id": "test-id.access", "CF-Access-Client-Secret": "test-secret",
+				} {
+					if !sameOrigin {
+						expected = ""
+					}
+					if r.Header.Get(header) != expected {
+						t.Errorf("incorrect credential scope for %s", header)
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"user":{"name":"users/test"}}`)
+			})
+			external := httptest.NewServer(destination)
+			defer external.Close()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/redirected" {
+					destination.ServeHTTP(w, r)
+					return
+				}
+				target := external.URL
+				if sameOrigin {
+					target = "/redirected"
+				}
+				http.Redirect(w, r, target, http.StatusFound)
+			}))
+			defer server.Close()
+			client := NewClient(server.URL).WithServiceToken("test-id.access", "test-secret").WithAccessToken("memos-token")
+			if _, err := client.GetCurrentUser(context.Background()); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

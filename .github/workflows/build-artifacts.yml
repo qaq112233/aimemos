@@ -6,7 +6,7 @@ on:
       version:
         description: Version to use for this manual build
         required: true
-        default: v0.3.0
+        default: v0.3.2
         type: string
   release:
     types: [published]

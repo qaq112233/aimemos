@@ -57,6 +57,34 @@ func TestFromEnvKeepsDataPath(t *testing.T) {
 	}
 }
 
+func TestMemosCloudflareServiceToken(t *testing.T) {
+	for _, tc := range []struct {
+		name, id, secret string
+		wantError        bool
+	}{
+		{"disabled", "", "", false},
+		{"enabled", " test-id.access ", " test-secret ", false},
+		{"missing secret", "test-id.access", "", true},
+		{"missing id", "", "test-secret", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := FromEnv(env(map[string]string{
+				"SERVER_ADDR": "https://memos.example.com", "BOT_TOKEN": "t", "ALLOWED_USER_IDS": "42",
+				"MEMOS_CF_ACCESS_CLIENT_ID": tc.id, "MEMOS_CF_ACCESS_CLIENT_SECRET": tc.secret,
+			}))
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "must be set together") || strings.Contains(err.Error(), "test-secret") {
+					t.Fatalf("missing credential accepted or leaked: %v", err)
+				}
+				return
+			}
+			if err != nil || cfg.MemosCFClientID != strings.TrimSpace(tc.id) || cfg.MemosCFClientSecret != strings.TrimSpace(tc.secret) {
+				t.Fatalf("service token configuration: %v", err)
+			}
+		})
+	}
+}
+
 func TestProxyEnvironmentPrecedenceAndValidation(t *testing.T) {
 	for _, tc := range []struct{ shared, telegram, want string }{
 		{"", "", ""},

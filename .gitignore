@@ -8,3 +8,5 @@ data/
 notebook.yaml
 web-settings.json
 __pycache__/
+.aimemos-runtime/
+aimemos-server-config*.tar.gz

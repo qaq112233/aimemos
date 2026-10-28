@@ -23,6 +23,9 @@ const DefaultDataPath = "data.txt"
 type Config struct {
 	// ServerAddr is the normalized Memos base URL (SERVER_ADDR).
 	ServerAddr string
+	// Optional Cloudflare Access service token for the Memos endpoint.
+	MemosCFClientID     string
+	MemosCFClientSecret string
 	// BotToken is the Telegram bot token (BOT_TOKEN).
 	BotToken string
 	// BotProxyAddr optionally replaces the Telegram Bot API server (BOT_PROXY_ADDR).
@@ -54,11 +57,13 @@ func Load() (*Config, error) {
 // FromEnv builds and validates a configuration from the given lookup function.
 func FromEnv(getenv func(string) string) (*Config, error) {
 	cfg := &Config{
-		BotToken:         strings.TrimSpace(getenv("BOT_TOKEN")),
-		BotProxyAddr:     strings.TrimSpace(getenv("BOT_PROXY_ADDR")),
-		ProxyURL:         strings.TrimSpace(getenv("PROXY_URL")),
-		TelegramProxyURL: strings.TrimSpace(getenv("TELEGRAM_PROXY_URL")),
-		DataPath:         strings.TrimSpace(getenv("DATA")),
+		MemosCFClientID:     strings.TrimSpace(getenv("MEMOS_CF_ACCESS_CLIENT_ID")),
+		MemosCFClientSecret: strings.TrimSpace(getenv("MEMOS_CF_ACCESS_CLIENT_SECRET")),
+		BotToken:            strings.TrimSpace(getenv("BOT_TOKEN")),
+		BotProxyAddr:        strings.TrimSpace(getenv("BOT_PROXY_ADDR")),
+		ProxyURL:            strings.TrimSpace(getenv("PROXY_URL")),
+		TelegramProxyURL:    strings.TrimSpace(getenv("TELEGRAM_PROXY_URL")),
+		DataPath:            strings.TrimSpace(getenv("DATA")),
 	}
 	serverAddr := getenv("SERVER_ADDR")
 	if strings.TrimSpace(serverAddr) == "" {
@@ -67,6 +72,9 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 	var err error
 	if cfg.ServerAddr, err = memos.NormalizeBaseURL(serverAddr); err != nil {
 		return nil, fmt.Errorf("SERVER_ADDR %w", err)
+	}
+	if (cfg.MemosCFClientID == "") != (cfg.MemosCFClientSecret == "") {
+		return nil, errors.New("MEMOS_CF_ACCESS_CLIENT_ID and MEMOS_CF_ACCESS_CLIENT_SECRET must be set together")
 	}
 	if cfg.BotToken == "" {
 		return nil, errors.New("BOT_TOKEN is required")

@@ -47,9 +47,27 @@ func newClient(baseURL string, httpClient *http.Client, legacyAPI *atomic.Bool) 
 // WithAccessToken returns a client that authenticates with a Personal Access
 // Token. It shares the API base path selection with c.
 func (c *Client) WithAccessToken(accessToken string) *Client {
+	u, _ := url.Parse(c.baseURL)
 	httpClient := &http.Client{
 		Timeout:   c.httpClient.Timeout,
-		Transport: &authTransport{token: accessToken, transport: c.httpClient.Transport},
+		Transport: &authTransport{origin: u.Scheme + "://" + u.Host, token: accessToken, transport: c.httpClient.Transport},
+	}
+	return newClient(c.baseURL, httpClient, c.legacyAPI)
+}
+
+// WithServiceToken authenticates Memos requests through Cloudflare Access.
+// Derived user clients retain the service token and API namespace selection.
+func (c *Client) WithServiceToken(clientID, clientSecret string) *Client {
+	if clientID == "" {
+		return c
+	}
+	u, _ := url.Parse(c.baseURL)
+	httpClient := &http.Client{
+		Timeout: c.httpClient.Timeout,
+		Transport: &authTransport{
+			origin: u.Scheme + "://" + u.Host, clientID: clientID, clientSecret: clientSecret,
+			transport: c.httpClient.Transport,
+		},
 	}
 	return newClient(c.baseURL, httpClient, c.legacyAPI)
 }
@@ -188,14 +206,24 @@ func (t *apiTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 type authTransport struct {
-	token     string
-	transport http.RoundTripper
+	origin       string
+	token        string
+	clientID     string
+	clientSecret string
+	transport    http.RoundTripper
 }
 
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	if t.token != "" {
-		req.Header.Set("Authorization", "Bearer "+t.token)
+	// Access may redirect to an identity provider; credentials stay at Memos.
+	if req.URL.Scheme+"://"+req.URL.Host == t.origin {
+		if t.token != "" {
+			req.Header.Set("Authorization", "Bearer "+t.token)
+		}
+		if t.clientID != "" {
+			req.Header.Set("CF-Access-Client-Id", t.clientID)
+			req.Header.Set("CF-Access-Client-Secret", t.clientSecret)
+		}
 	}
 	return t.transport.RoundTrip(req)
 }

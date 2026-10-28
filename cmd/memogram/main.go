@@ -64,7 +64,7 @@ func run() int {
 		Token:     cfg.BotToken,
 		ServerURL: cfg.BotProxyAddr,
 		ProxyURL:  cfg.TelegramProxyURL,
-		Memos:     memos.NewClient(cfg.ServerAddr),
+		Memos:     memos.NewClient(cfg.ServerAddr).WithServiceToken(cfg.MemosCFClientID, cfg.MemosCFClientSecret),
 		Store:     data,
 		Access:    cfg.Access,
 	}
