@@ -28,8 +28,8 @@ github.com/oapi-codegen/nullable v1.1.0 h1:eAh8JVc5430VtYVnq00Hrbpag9PFRGWLjxR1/
 github.com/oapi-codegen/nullable v1.1.0/go.mod h1:KUZ3vUzkmEKY90ksAmit2+5juDIhIZhfDl+0PwOQlFY=
 github.com/oapi-codegen/runtime v1.7.0 h1:t7358VYPvNbWJ9gdAkIK/smVeHpBf6yp8VTsaZsb/7k=
 github.com/oapi-codegen/runtime v1.7.0/go.mod h1:GwV7hC2hviaMzj+ITfHVRESK5J2W/GefVwIND/bMGvU=
-github.com/openai/openai-go/v3 v3.86.0 h1:OBq62xi3tSI9zMTm++XifNnfHKMpWfPKomS+Butvxyg=
-github.com/openai/openai-go/v3 v3.86.0/go.mod h1:i+lM+NFmWP+Yd+fYKEaPxUINBx+vZtRmY5gaszSfsiQ=
+github.com/openai/openai-go/v3 v3.90.0 h1:OsAszzODKw2fz6jrasGCdUH8t3Zr8pUEnZAeW7QMKh4=
+github.com/openai/openai-go/v3 v3.90.0/go.mod h1:TQHvyB61TWJ7oEf7wnq4NAM/TatuqnUCJ+qbKj8POsE=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
